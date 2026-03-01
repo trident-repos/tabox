@@ -1,10 +1,12 @@
 /* Section headers and dividers */
 .section-header {
-    padding: 0 5px 5px 5px;
+    padding: 0 5px 4px 5px;
+    width: 100%;
+    margin-left: 0;
 }
 
 .section-title {
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 600;
     color: var(--text-secondary-color);
     text-transform: uppercase;
@@ -16,11 +18,13 @@
 .collapsible-header {
     cursor: pointer;
     user-select: none;
-    padding: 8px 5px;
-    border-radius: 8px;
+    padding: 6px 5px;
+    border-radius: 6px;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
     overflow: hidden;
+    width: 100%;
+    margin-left: 0;
     
     /* Liquid glass effect */
     background: rgba(255, 255, 255, 0.05);
@@ -39,7 +43,7 @@
 .section-header-content {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
 }
 
 .section-header-content .section-title {
@@ -48,7 +52,7 @@
 }
 
 .section-count {
-    font-size: 14px;
+    font-size: 13px;
     color: var(--text-secondary-color);
     opacity: 0.6;
     font-weight: 800;

@@ -65,15 +65,41 @@ export const showUndoToast = (
 
 /**
  * Show a simple success toast
+ * @param {string} message - Message to display
+ * @param {number} duration - Duration in ms (default 3000)
  */
-export const showSuccessToast = (message) => {
+export const showSuccessToast = (message, duration = 3000) => {
     enforceToastLimit();
     
     const toastId = toast.success(message, {
-        duration: 3000,
+        duration: duration,
         position: 'bottom-center',
         style: {
             background: '#4caf50',
+            color: '#fff',
+            padding: '12px 16px',
+            borderRadius: '8px',
+        },
+    });
+    
+    trackToast(toastId);
+    return toastId;
+};
+
+/**
+ * Show a warning/info toast (for incognito and other informational messages)
+ * @param {string} message - Message to display
+ * @param {number} duration - Duration in ms (default 4000)
+ */
+export const showInfoToast = (message, duration = 4000) => {
+    enforceToastLimit();
+    
+    const toastId = toast(message, {
+        duration: duration,
+        position: 'bottom-center',
+        icon: 'ℹ️',
+        style: {
+            background: '#2196f3',
             color: '#fff',
             padding: '12px 16px',
             borderRadius: '8px',

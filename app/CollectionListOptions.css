@@ -2,16 +2,16 @@
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	padding: 8px 12px;
-	margin: 5px 0;
-	gap: 12px;
+	padding: 5px 8px;
+	margin: 3px 0;
+	gap: 8px;
 	
 	/* True floating toolbar with enhanced transparency */
 	position: fixed;
-	top: 110px;
+	top: 100px;
 	left: 50%;
 	transform: translateX(-50%);
-	width: calc(100% - 20px);
+	width: calc(100% - 16px);
 	max-width: 1200px;
 	z-index: 1000;
 	
@@ -25,7 +25,7 @@
 	backdrop-filter: blur(16px) saturate(180%) brightness(105%);
 	-webkit-backdrop-filter: blur(16px) saturate(180%) brightness(105%);
 	border: 1px solid rgba(255, 255, 255, 0.4);
-	border-radius: 20px;
+	border-radius: 14px;
 	
 	/* Enhanced floating shadows with depth */
 	box-shadow: 
@@ -86,7 +86,7 @@
 .toolbar-left {
 	display: flex;
 	align-items: center;
-	gap: 6px;
+	gap: 4px;
 	flex-shrink: 0;
 }
 
@@ -95,14 +95,14 @@
 	align-items: center;
 	justify-content: center;
 	flex: 1;
-	min-width: 150px; /* Reduced minimum space */
+	min-width: 120px; /* Reduced minimum space */
 	transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .toolbar-right {
 	display: flex;
 	align-items: center;
-	gap: 6px;
+	gap: 4px;
 	flex-shrink: 0;
 }
 
@@ -117,6 +117,7 @@
 	cursor: pointer;
 	position: relative;
 	overflow: hidden;
+	font-size: 18px;
 	
 	/* Liquid Glass Effect */
 	background: linear-gradient(
@@ -127,7 +128,7 @@
 	backdrop-filter: blur(8px) saturate(130%);
 	-webkit-backdrop-filter: blur(8px) saturate(130%);
 	border: 1px solid rgba(255, 255, 255, 0.3);
-	border-radius: 12px;
+	border-radius: 8px;
 	
 	/* Shadows for depth */
 	box-shadow: 
@@ -135,6 +136,13 @@
 		inset 0 1px 0 rgba(255, 255, 255, 0.4),
 		inset 0 -1px 0 rgba(255, 255, 255, 0.1);
 	transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Increase icon size in toolbar buttons */
+.toolbar-button svg,
+.toolbar-button .icon {
+	width: 20px;
+	height: 20px;
 }
 
 .toolbar-button::before {
@@ -213,19 +221,19 @@
 .sort-controls {
 	display: flex;
 	align-items: center;
-	gap: 6px;
+	gap: 4px;
 }
 
 .sort-icon {
-	font-size: 14px;
+	font-size: 13px;
 	color: var(--text-color);
 	display: flex;
 	align-items: center;
 	justify-content: center;
 	opacity: 0.8;
 	cursor: pointer;
-	height: 28px;
-	width: 28px;
+	height: 24px;
+	width: 24px;
 	padding: 0;
 	border-radius: 6px;
 	box-sizing: border-box;
@@ -247,8 +255,9 @@
 	backdrop-filter: blur(8px) saturate(120%) !important;
 	-webkit-backdrop-filter: blur(8px) saturate(120%) !important;
 	border: 1px solid rgba(255, 255, 255, 0.3) !important;
-	border-radius: 8px !important;
-	min-height: 28px !important;
+	border-radius: 6px !important;
+	min-height: 32px !important;
+	height: 32px !important;
 	font-size: 11px !important;
 	cursor: pointer !important;
 	transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
@@ -278,11 +287,11 @@
 }
 
 .react-select__value-container {
-	padding: 0 6px !important; /* Reduced padding */
+	padding: 0 8px !important;
 }
 
 .react-select__single-value {
-	font-size: 11px !important; /* Reduced font size */
+	font-size: 11px !important;
 }
 
 .react-select__indicator-separator {
@@ -290,8 +299,8 @@
 }
 
 .react-select__dropdown-indicator {
-	padding: 4px !important; /* Reduced from default */
-	width: 16px !important; /* Smaller dropdown arrow */
+	padding: 6px !important;
+	width: 20px !important;
 }
 
 .react-select__dropdown-indicator:hover {
@@ -364,6 +373,7 @@
 	cursor: pointer;
 	position: relative;
 	overflow: hidden;
+	font-size: 18px;
 	
 	/* Liquid Glass Effect */
 	background: linear-gradient(
@@ -374,7 +384,7 @@
 	backdrop-filter: blur(8px) saturate(130%);
 	-webkit-backdrop-filter: blur(8px) saturate(130%);
 	border: 1px solid rgba(255, 255, 255, 0.3);
-	border-radius: 12px;
+	border-radius: 8px;
 	
 	/* Shadows for depth */
 	box-shadow: 
@@ -382,6 +392,13 @@
 		inset 0 1px 0 rgba(255, 255, 255, 0.4),
 		inset 0 -1px 0 rgba(255, 255, 255, 0.1);
 	transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Increase icon size in toggle buttons */
+.toolbar-toggle-button svg,
+.toolbar-toggle-button .icon {
+	width: 20px;
+	height: 20px;
 }
 
 .toolbar-toggle-button::before {

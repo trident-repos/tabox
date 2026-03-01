@@ -1,5 +1,5 @@
 :root {
-    --tile-size: 200px;
+    --tile-size: 165px;
     --tile-border-radius: calc(var(--tile-size) * 0.057); /* 8px at 140px */
     --tile-padding: calc(var(--tile-size) * 0.057); /* 8px at 140px */
     --tile-button-size: calc(var(--tile-size) * 0.171); /* 24px at 140px */
@@ -46,7 +46,6 @@
 }
 
 .collection-tile:hover {
-    transform: translateY(-3px) scale(1.01);
     box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
     border: 3px solid rgba(255, 255, 255, 0.25);
 }
@@ -85,7 +84,7 @@
 
 /* Header with collection name */
 .tile-header {
-    padding: 15px 0 0 0;
+    padding: 10px 0 0 0;
     text-align: center;
     flex-shrink: 0;
 }
@@ -99,7 +98,7 @@
 
 .tile-title {
     margin: 0;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 600;
     color: var(--text-color);
     line-height: 1.2;
@@ -126,6 +125,31 @@
 [data-theme="dark"] .tile-title-row .recently-opened-indicator {
     background: rgba(34, 197, 94, 0.9);
     border: 1px solid rgba(34, 197, 94, 1);
+}
+
+/* Incognito indicator for collections saved from incognito mode */
+.tile-title-row .incognito-indicator {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(156, 163, 175, 0.8);
+    font-size: 10px;
+    flex-shrink: 0;
+    cursor: help;
+    transition: color 0.2s ease;
+}
+
+.tile-title-row .incognito-indicator:hover {
+    color: rgba(156, 163, 175, 1);
+}
+
+/* Dark mode styles for incognito indicator */
+[data-theme="dark"] .tile-title-row .incognito-indicator {
+    color: rgba(209, 213, 219, 0.7);
+}
+
+[data-theme="dark"] .tile-title-row .incognito-indicator:hover {
+    color: rgba(209, 213, 219, 1);
 }
 
 /* Favicons grid */
@@ -271,6 +295,27 @@
     opacity: 1;
 }
 
+/* Matching tabs badge for search results */
+.tile-matching-badge {
+    position: absolute;
+    top: var(--tile-padding);
+    left: var(--tile-padding);
+    font-size: 9px;
+    font-weight: 600;
+    color: white;
+    background: var(--primary-color, #3498db);
+    padding: 2px 6px;
+    border-radius: 8px;
+    white-space: nowrap;
+    z-index: 10;
+    opacity: 0.9;
+    pointer-events: none;
+}
+
+[data-theme="dark"] .tile-matching-badge {
+    background: rgba(var(--primary-color-rgb, 52, 152, 219), 0.85);
+}
+
 /* Active auto-tracking animation for tiles - on footer area */
 .collection-tile.active-auto-tracking .tile-footer {
     background: var(--active-auto-update-gradient);
@@ -324,7 +369,7 @@
 /* Responsive adjustments */
 @media (max-width: 650px) {
     :root {
-        --tile-size: 150px; /* Smaller tiles on mobile */
+        --tile-size: 140px; /* Smaller tiles on mobile */
     }
     
     .collection-tile {

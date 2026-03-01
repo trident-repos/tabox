@@ -145,10 +145,12 @@ export const atomicStorageTransaction = async (transaction) => {
             throw new Error('Browser storage API not available');
         }
         
-        // For large storage, create minimal backup
+        // For large storage, create minimal backup (must include folders!)
         const fullData = await getAllStorageData();
         const preTransactionData = {
             tabsArray: fullData.tabsArray || [],
+            [STORAGE_KEYS.FOLDERS_INDEX]: fullData[STORAGE_KEYS.FOLDERS_INDEX] || {},
+            [STORAGE_KEYS.COLLECTIONS_INDEX]: fullData[STORAGE_KEYS.COLLECTIONS_INDEX] || {},
             localTimestamp: fullData.localTimestamp || Date.now(),
             atomicBackupTimestamp: Date.now()
         };
@@ -579,7 +581,7 @@ export const migrateLegacyStorage = async () => {
                 createdOn: normalizedCollection.createdOn,
                 color: normalizedCollection.color,
                 size: collectionSize,
-                parentId: null
+                parentId: collection.parentId || null  // Preserve folder membership
             };
         }
         
@@ -843,6 +845,17 @@ export const batchUpdateCollections = async (collections) => {
             collectionForStorage.tabs = tabsToSave;
             collectionForStorage.chromeGroups = groupsToSave;
             
+            // ALWAYS use index order as source of truth (index is updated by updateCollectionsOrder)
+            // This ensures that even if in-memory collections have stale order values,
+            // we use the correct order from the index which was just updated
+            const indexOrder = index[collection.uid]?.order;
+            if (indexOrder !== undefined && indexOrder !== null) {
+                collectionForStorage.order = indexOrder;
+            } else if (collectionForStorage.order === undefined) {
+                // No order in index and none in collection - leave undefined
+            }
+            // If collection has order but index doesn't, keep collection's order
+            
             const collectionSize = JSON.stringify(collectionForStorage).length;
             
             // Add to batch update - preserve existing lastUpdated and lastOpened timestamps
@@ -866,23 +879,20 @@ export const batchUpdateCollections = async (collections) => {
             };
             
             // Handle order field:
-            // - If collection has order explicitly set (including 0), use it
-            // - If collection has order set to null, it means "clear the order" - explicitly delete it from index
-            // - If collection has order undefined, check if it exists in current index and preserve it
-            if (collection.order !== undefined && collection.order !== null) {
-                // Explicit order value provided
+            // ALWAYS prefer existing index order as source of truth (updateCollectionsOrder updates the index)
+            // This prevents stale in-memory order values from overwriting correct index values
+            const existingIndexOrder = index[collection.uid]?.order;
+            
+            if (collection.order === null) {
+                // Explicitly clearing order - don't add order to indexEntry
+            } else if (existingIndexOrder !== undefined && existingIndexOrder !== null) {
+                // Index has order - use it (source of truth)
+                indexEntry.order = existingIndexOrder;
+            } else if (collection.order !== undefined && collection.order !== null) {
+                // Index doesn't have order but collection does - use collection's
                 indexEntry.order = collection.order;
-            } else if (collection.order === null) {
-                // Explicitly clearing order - ensure it's removed from index
-                // Don't add order to indexEntry, and explicitly delete it from existing index entry if present
-            } else {
-                // order is undefined - preserve existing order if any
-                const existingOrder = index[collection.uid]?.order;
-                if (existingOrder !== undefined && existingOrder !== null) {
-                    indexEntry.order = existingOrder;
-                }
-                // If no existing order, don't add one (allows user sorting to take effect)
             }
+            // If neither has order, don't add one (allows user sorting to take effect)
             
             // Update index entry - replacing the old entry with the new one
             // If order was null, the new entry won't have order, effectively removing it
@@ -919,6 +929,7 @@ export const batchUpdateCollections = async (collections) => {
 export const loadFoldersIndex = async () => {
     try {
         const { [STORAGE_KEYS.FOLDERS_INDEX]: index } = await browser.storage.local.get(STORAGE_KEYS.FOLDERS_INDEX);
+        console.log('📁 [Popup] loadFoldersIndex: Found', Object.keys(index || {}).length, 'entries');
         return index || {};
     } catch (error) {
         console.error('Failed to load folders index:', error);
@@ -1041,10 +1052,13 @@ export const loadAllFolders = async (options = {}) => {
             sortOrder = 'desc'
         } = options;
         
+        console.log('📁 [Popup] loadAllFolders: Starting to load folders');
+        
         // Load folders index
         const index = await loadFoldersIndex();
         
         if (Object.keys(index).length === 0) {
+            console.log('📁 [Popup] loadAllFolders: No folders in index');
             return [];
         }
         
@@ -1080,10 +1094,13 @@ export const loadAllFolders = async (options = {}) => {
         const folders = await loadMultipleFolders(sortedUids);
         
         // Combine with metadata and return in sorted order
-        return sortedUids.map(uid => ({
+        const result = sortedUids.map(uid => ({
             uid,
             ...folders[uid]
         })).filter(folder => folder.uid); // Filter out any failed loads
+        
+        console.log('📁 [Popup] loadAllFolders: Returning', result.length, 'folders');
+        return result;
         
     } catch (error) {
         console.error('Failed to load all folders:', error);
@@ -1219,5 +1236,99 @@ export const updateCollectionsOrder = async (collections) => {
     } catch (error) {
         console.error('Failed to update collection order:', error);
         return false;
+    }
+};
+
+// ========================================
+// ORPHAN COLLECTION REPAIR
+// ========================================
+
+/**
+ * Detect and repair orphan collections
+ * Orphan collections are those with a parentId that points to a non-existent folder.
+ * This can happen due to:
+ * - Sync race conditions (collections sync before folders)
+ * - Folder deletion that didn't properly clean up parentId references
+ * - Incomplete sync where folder data was lost
+ * 
+ * This function finds orphan collections and resets their parentId to null,
+ * effectively moving them to the root level so they become visible again.
+ * 
+ * @returns {Promise<{success: boolean, orphansFound: number, orphansRepaired: number, orphanUids: string[]}>}
+ */
+export const repairOrphanCollections = async () => {
+    try {
+        // Load collections index and folders index
+        const collectionsIndex = await loadCollectionsIndex();
+        const foldersIndex = await loadFoldersIndex();
+        
+        // Get set of valid folder UIDs
+        const validFolderUids = new Set(Object.keys(foldersIndex));
+        
+        // Find orphan collections (have parentId but folder doesn't exist)
+        const orphanUids = [];
+        for (const [uid, meta] of Object.entries(collectionsIndex)) {
+            if (meta.parentId && !validFolderUids.has(meta.parentId)) {
+                orphanUids.push(uid);
+            }
+        }
+        
+        if (orphanUids.length === 0) {
+            return { 
+                success: true, 
+                orphansFound: 0, 
+                orphansRepaired: 0, 
+                orphanUids: [] 
+            };
+        }
+        
+        console.warn(`⚠️ Found ${orphanUids.length} orphan collection(s) with invalid parentId references:`, orphanUids);
+        
+        // Repair each orphan collection
+        let orphansRepaired = 0;
+        for (const uid of orphanUids) {
+            try {
+                // Update collection index
+                collectionsIndex[uid].parentId = null;
+                
+                // Load and update the full collection record
+                const collection = await loadSingleCollection(uid);
+                if (collection) {
+                    collection.parentId = null;
+                    // Don't update lastUpdated - this is a repair operation, not a user edit
+                    const collectionKey = `${STORAGE_KEYS.COLLECTION_PREFIX}${uid}`;
+                    await browser.storage.local.set({
+                        [collectionKey]: collection
+                    });
+                    orphansRepaired++;
+                }
+            } catch (err) {
+                console.error(`Failed to repair orphan collection ${uid}:`, err);
+            }
+        }
+        
+        // Save updated collections index
+        await browser.storage.local.set({
+            [STORAGE_KEYS.COLLECTIONS_INDEX]: collectionsIndex
+        });
+        
+        console.log(`✅ Repaired ${orphansRepaired}/${orphanUids.length} orphan collection(s)`);
+        
+        return { 
+            success: true, 
+            orphansFound: orphanUids.length, 
+            orphansRepaired, 
+            orphanUids 
+        };
+        
+    } catch (error) {
+        console.error('Failed to repair orphan collections:', error);
+        return { 
+            success: false, 
+            orphansFound: 0, 
+            orphansRepaired: 0, 
+            orphanUids: [],
+            error: error.message 
+        };
     }
 }; 

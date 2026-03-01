@@ -43,6 +43,14 @@ export function applyUid(item) {
     newCollection.parentId = item.parentId;
   }
   
+  // Preserve incognito metadata if it exists
+  if (item.savedFromIncognito !== undefined) {
+    newCollection.savedFromIncognito = item.savedFromIncognito;
+  }
+  if (item.incognitoTabCount !== undefined) {
+    newCollection.incognitoTabCount = item.incognitoTabCount;
+  }
+  
   return newCollection;
 }
 
@@ -55,8 +63,11 @@ export async function getCurrentTabsAndGroups(title, forceOnlyHighlighted = fals
   if (chkIgnorePinned) tabQueryProperties.pinned = false;
   let tabs = await browser.tabs.query(tabQueryProperties);
   let window;
+  let isFromIncognito = false;
   try {
     window = await browser.windows.getCurrent({ populate: true, windowTypes: ['normal'] });
+    // Detect if this is an incognito window
+    isFromIncognito = window.incognito === true;
     delete window.tabs;
   } catch (error) {
     console.error('Failed to get current window in getCurrentTabsAndGroups:', error);
@@ -64,6 +75,14 @@ export async function getCurrentTabsAndGroups(title, forceOnlyHighlighted = fals
     const newItem = new TaboxCollection(title, tabs, allChromeGroups, null, null, null, null);
     return applyUid(newItem);
   }
+  
+  // Count incognito tabs and mark them
+  const incognitoTabCount = tabs.filter(t => t.incognito === true).length;
+  tabs = tabs.map(t => ({
+    ...t,
+    wasIncognito: t.incognito === true
+  }));
+  
   let allChromeGroups;
   if (browser.tabGroups) {
     try {
@@ -79,6 +98,11 @@ export async function getCurrentTabsAndGroups(title, forceOnlyHighlighted = fals
     allChromeGroups = [];
   }
   const newItem = new TaboxCollection(title, tabs, allChromeGroups, null, null, window, null);
+  
+  // Add incognito metadata
+  newItem.savedFromIncognito = isFromIncognito;
+  newItem.incognitoTabCount = incognitoTabCount;
+  
   return applyUid(newItem);
 }
 
@@ -111,6 +135,9 @@ export async function getAllWindowsTabsAndGroups(folderName) {
     for (let i = 0; i < windows.length; i++) {
       const window = windows[i];
       
+      // Detect if this is an incognito window
+      const isFromIncognito = window.incognito === true;
+      
       // Get tabs for this window
       let tabQueryProperties = { windowId: window.id };
       if (chkIgnorePinned) tabQueryProperties.pinned = false;
@@ -119,6 +146,13 @@ export async function getAllWindowsTabsAndGroups(folderName) {
       
       // Skip windows with no tabs (shouldn't happen but be safe)
       if (!tabs || tabs.length === 0) continue;
+      
+      // Count incognito tabs and mark them
+      const incognitoTabCount = tabs.filter(t => t.incognito === true).length;
+      tabs = tabs.map(t => ({
+        ...t,
+        wasIncognito: t.incognito === true
+      }));
       
       // Get tab groups for this window
       let allChromeGroups = [];
@@ -134,8 +168,8 @@ export async function getAllWindowsTabsAndGroups(folderName) {
         }
       }
       
-      // Create collection name based on window
-      const collectionName = windows.length === 1 
+      // Create collection name based on window (include incognito indicator in name)
+      let collectionName = windows.length === 1 
         ? folderName 
         : `${folderName} - Window ${i + 1}`;
       
@@ -155,6 +189,10 @@ export async function getAllWindowsTabsAndGroups(folderName) {
       
       // Set the collection's parent to the folder
       collection.parentId = folder.uid;
+      
+      // Add incognito metadata
+      collection.savedFromIncognito = isFromIncognito;
+      collection.incognitoTabCount = incognitoTabCount;
       
       const collectionWithUid = applyUid(collection);
       collections.push(collectionWithUid);

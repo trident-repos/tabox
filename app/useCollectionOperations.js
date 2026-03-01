@@ -1,7 +1,7 @@
 import React from 'react';
 import { FaTrash, FaRegCheckCircle } from 'react-icons/fa';
 import { downloadTextFile, getCurrentTabsAndGroups, generateCopyName, applyUid } from './utils';
-import { showUndoToast, showSuccessToast } from './toastHelpers';
+import { showUndoToast, showSuccessToast, showInfoToast } from './toastHelpers';
 import { UNDO_TIME } from './constants';
 import { browser } from '../static/globals';
 import TaboxCollection from './model/TaboxCollection';
@@ -173,6 +173,7 @@ export function useCollectionOperations({
         newItem.uid = collection.uid;
         newItem.createdOn = collection.createdOn; // Preserve original creation time
         newItem.lastUpdated = Date.now(); // Set current time as last updated
+        newItem.parentId = collection.parentId; // Preserve folder assignment (fixes eject bug)
         await updateCollection(newItem, true); // Pass true for manual update to trigger lightning effect
         
         showUndoToast(
@@ -198,11 +199,32 @@ export function useCollectionOperations({
         }
         
         const { chkOpenNewWindow } = await browser.storage.local.get('chkOpenNewWindow');
+        
+        // Check if collection was saved from incognito
+        const wasFromIncognito = collection.savedFromIncognito === true;
+        let incognitoAllowed = false;
+        
+        // If collection was from incognito, check if we can open in incognito
+        if (wasFromIncognito && chkOpenNewWindow) {
+            try {
+                const incognitoCheck = await browser.runtime.sendMessage({ type: 'checkIncognitoAccess' });
+                incognitoAllowed = incognitoCheck?.allowed === true;
+            } catch (error) {
+                console.warn('Could not check incognito access:', error);
+            }
+        }
+        
         let window;
         if (chkOpenNewWindow) {
             let windowCreationObject = { focused: true };
+            
+            // Try to open in incognito if the collection was from incognito and we have permission
+            if (wasFromIncognito && incognitoAllowed) {
+                windowCreationObject.incognito = true;
+            }
 
-            if (collection.window) {
+            if (collection.window && !windowCreationObject.incognito) {
+                // Window position only applies to normal windows
                 try {
                     const displays = await browser.system.display.getInfo();
                     const primaryDisplay = displays.find(d => d.isPrimary) || displays[0];
@@ -247,7 +269,19 @@ export function useCollectionOperations({
                     windowCreationObject.height = collection.window.height;
                 }
             }
-            window = await browser.windows.create(windowCreationObject);
+            
+            try {
+                window = await browser.windows.create(windowCreationObject);
+            } catch (windowError) {
+                // If incognito window creation fails, fall back to normal window
+                if (windowCreationObject.incognito) {
+                    console.warn('Failed to create incognito window, falling back to normal:', windowError);
+                    delete windowCreationObject.incognito;
+                    window = await browser.windows.create(windowCreationObject);
+                } else {
+                    throw windowError;
+                }
+            }
             window.tabs = await browser.tabs.query({ windowId: window.id });
         } else {
             window = await browser.windows.getCurrent({ populate: true, windowTypes: ['normal'] });
@@ -256,9 +290,27 @@ export function useCollectionOperations({
         const msg = {
             type: 'openTabs',
             collection: collection,
-            window: window
+            window: window,
+            newWindow: chkOpenNewWindow
         };
-        await browser.runtime.sendMessage(msg);
+        const result = await browser.runtime.sendMessage(msg);
+        
+        // Show feedback for incognito-related scenarios
+        if (result && typeof result === 'object') {
+            if (result.wasFromIncognito && !result.restoredToIncognito && !result.isIncognitoWindow) {
+                // Collection was from incognito but opened in normal window
+                showInfoToast(
+                    `Opened in normal window (saved from incognito${!incognitoAllowed ? ' - enable "Allow in incognito" to restore to incognito' : ''})`,
+                    4000
+                );
+            }
+            if (result.skippedForIncognito > 0) {
+                showInfoToast(
+                    `${result.skippedForIncognito} tab(s) skipped - not allowed in incognito`,
+                    4000
+                );
+            }
+        }
         
         // Track that this collection was opened
         const updatedCollection = {

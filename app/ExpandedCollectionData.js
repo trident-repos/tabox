@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useEffectEvent } from 'react';
+import React, { useEffect, useRef, useState, useMemo, useEffectEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { showUndoToast } from './toastHelpers';
 import { getCurrentTabsAndGroups } from './utils';
@@ -136,44 +136,53 @@ function ExpandedCollectionData(props) {
     };
 
     // Track mouse position during drag for cross-context drop detection (tabs)
+    // Use a ref to avoid re-registering the listener on every mouse move
+    const draggingTabRef = useRef(draggingTab);
+    draggingTabRef.current = draggingTab;
+
     useEffect(() => {
         if (!draggingTab) return;
-        
+
         const handleMouseMove = (e) => {
-            if (draggingTab) {
+            const current = draggingTabRef.current;
+            if (current) {
                 setDraggingTab({
-                    ...draggingTab,
+                    ...current,
                     lastMouseX: e.clientX,
                     lastMouseY: e.clientY
                 });
             }
         };
-        
+
         document.addEventListener('mousemove', handleMouseMove);
         return () => {
             document.removeEventListener('mousemove', handleMouseMove);
         };
-    }, [draggingTab, setDraggingTab]);
+    }, [!!draggingTab, setDraggingTab]);
 
     // Track mouse position during drag for cross-context drop detection (groups)
+    const draggingGroupRef = useRef(draggingGroup);
+    draggingGroupRef.current = draggingGroup;
+
     useEffect(() => {
         if (!draggingGroup) return;
-        
+
         const handleMouseMove = (e) => {
-            if (draggingGroup) {
+            const current = draggingGroupRef.current;
+            if (current) {
                 setDraggingGroup({
-                    ...draggingGroup,
+                    ...current,
                     lastMouseX: e.clientX,
                     lastMouseY: e.clientY
                 });
             }
         };
-        
+
         document.addEventListener('mousemove', handleMouseMove);
         return () => {
             document.removeEventListener('mousemove', handleMouseMove);
         };
-    }, [draggingGroup, setDraggingGroup]);
+    }, [!!draggingGroup, setDraggingGroup]);
 
     // Drag and Drop Handlers
     const handleDragStart = (event) => {
@@ -209,19 +218,30 @@ function ExpandedCollectionData(props) {
 
     const handleDragEnd = async (event) => {
         const { active, over } = event;
-        
         // Check if dragging a group
         const draggedGroup = props.collection.chromeGroups.find((g) => g.uid === active.id);
         if (draggedGroup) {
             // Group drag - handle separately
             setActiveGroup(null);
             // Don't clear draggingGroup here - let CollectionList handle it after processing the drop
-            
-            if (!over || active.id === over.id) {
-                // If not dropped on anything, clear the drag state
-                if (!draggingGroup || draggingGroup.sourceCollection.uid !== props.collection.uid) {
-                    setDraggingGroup(null);
+
+            // Check if the pointer is outside the source collection — cross-collection drop
+            const currentDraggingGrp = draggingGroupRef.current;
+            if (currentDraggingGrp) {
+                const collectionEl = document.querySelector(`[data-collection-uid="${props.collection.uid}"]`);
+                if (collectionEl) {
+                    const rect = collectionEl.getBoundingClientRect();
+                    const mx = currentDraggingGrp.lastMouseX;
+                    const my = currentDraggingGrp.lastMouseY;
+                    if (mx < rect.left || mx > rect.right || my < rect.top || my > rect.bottom) {
+                        return;
+                    }
                 }
+            }
+
+            if (!over || active.id === over.id) {
+                // Don't clear draggingGroup here — CollectionList's mouseup handler handles
+                // all cross-collection drop cleanup. Same pointerup/mouseup race as tabs.
                 return;
             }
 
@@ -293,12 +313,30 @@ function ExpandedCollectionData(props) {
         
         setActiveTab(null); // Clear active tab state
         // Don't clear draggingTab here - let CollectionList handle it after processing the drop
-        
-        if (!over || active.id === over.id) {
-            // If not dropped on anything, clear the drag state
-            if (!draggingTab || draggingTab.sourceCollection.uid !== props.collection.uid) {
-                setDraggingTab(null);
+
+        // Check if the pointer is outside the source collection — if so, this is a
+        // cross-collection drop. Skip the intra-collection reorder and let the
+        // mouseup handler in CollectionList process the move.
+        // Note: can't use elementFromPoint here because the DragOverlay blocks it.
+        const currentDragging = draggingTabRef.current;
+        if (currentDragging) {
+            const collectionEl = document.querySelector(`[data-collection-uid="${props.collection.uid}"]`);
+            if (collectionEl) {
+                const rect = collectionEl.getBoundingClientRect();
+                const mx = currentDragging.lastMouseX;
+                const my = currentDragging.lastMouseY;
+                if (mx < rect.left || mx > rect.right || my < rect.top || my > rect.bottom) {
+                    // Mouse is outside source collection — cross-collection drop
+                    return;
+                }
             }
+        }
+
+        if (!over || active.id === over.id) {
+            // Don't clear draggingTab here — CollectionList's mouseup handler handles
+            // all cross-collection drop cleanup (valid drop, same-collection, or no target).
+            // Clearing here races with the mouseup handler: pointerup fires first (triggering
+            // handleDragEnd), then mouseup fires, but by then the atom would already be null.
             return;
         }
 

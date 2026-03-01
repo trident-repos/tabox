@@ -96,6 +96,10 @@ const saveSingleCollectionBG = async (collection, forceUpdateTimestamp = false) 
         const index = await loadCollectionsIndexBG();
         const collectionSize = JSON.stringify(collection).length;
         
+        // Preserve existing order if not provided in the collection data
+        const existingOrder = index[collection.uid]?.order;
+        const collectionOrder = collection.order !== undefined ? collection.order : existingOrder;
+        
         index[collection.uid] = {
             name: collection.name,
             type: 'collection',
@@ -105,7 +109,8 @@ const saveSingleCollectionBG = async (collection, forceUpdateTimestamp = false) 
             createdOn: collection.createdOn || now,
             color: collection.color || 'default',
             size: collectionSize,
-            parentId: preservedParentId
+            parentId: preservedParentId,
+            order: collectionOrder // Include order in index for proper sorting
         };
         
         await browser.storage.local.set({
@@ -139,7 +144,12 @@ const loadAllCollectionsBG = async (useNewStorageFirst = true) => {
                 uids.forEach(uid => {
                     const key = `${STORAGE_KEYS.COLLECTION_PREFIX}${uid}`;
                     if (results[key]) {
-                        collections.push(results[key]);
+                        const collection = results[key];
+                        // Include order from index if not in collection data
+                        if (collection.order === undefined && index[uid].order !== undefined) {
+                            collection.order = index[uid].order;
+                        }
+                        collections.push(collection);
                     }
                 });
                 
@@ -275,7 +285,11 @@ const updateAllCollectionsBG = async (collections) => {
                 const collectionKey = `${STORAGE_KEYS.COLLECTION_PREFIX}${collection.uid}`;
                 const lastUpdated = collection.lastUpdated !== null && collection.lastUpdated !== undefined ? collection.lastUpdated : now;
                 
-                // Prepare collection data
+                // Preserve existing order if not provided in the collection data
+                const existingOrder = newIndex[collection.uid]?.order;
+                const collectionOrder = collection.order !== undefined ? collection.order : existingOrder;
+                
+                // Prepare collection data (include order)
                 updates[collectionKey] = {
                     uid: collection.uid,
                     name: collection.name,
@@ -286,11 +300,13 @@ const updateAllCollectionsBG = async (collections) => {
                     lastOpened: collection.lastOpened !== null && collection.lastOpened !== undefined ? collection.lastOpened : null,
                     chromeGroups: collection.chromeGroups || [],
                     parentId: collection.parentId !== undefined ? collection.parentId : null,
-                    ...collection
+                    ...collection,
+                    order: collectionOrder // Ensure order is preserved in collection data
                 };
                 
                 // Update index entry
                 const collectionSize = JSON.stringify(updates[collectionKey]).length;
+                
                 newIndex[collection.uid] = {
                     name: collection.name,
                     type: 'collection',
@@ -300,7 +316,8 @@ const updateAllCollectionsBG = async (collections) => {
                     createdOn: collection.createdOn || now,
                     color: collection.color || 'default',
                     size: collectionSize,
-                    parentId: collection.parentId !== undefined ? collection.parentId : null
+                    parentId: collection.parentId !== undefined ? collection.parentId : null,
+                    order: collectionOrder // Include order in index for proper sorting
                 };
             }
             
@@ -341,6 +358,7 @@ const updateAllCollectionsBG = async (collections) => {
 const loadFoldersIndexBG = async () => {
     try {
         const { [STORAGE_KEYS.FOLDERS_INDEX]: index } = await browser.storage.local.get(STORAGE_KEYS.FOLDERS_INDEX);
+        console.log('📁 loadFoldersIndexBG: Index loaded with', Object.keys(index || {}).length, 'entries');
         return index || {};
     } catch (error) {
         console.error('Background: Failed to load folders index:', error);
@@ -373,6 +391,8 @@ const saveSingleFolderBG = async (folder, forceUpdateTimestamp = false) => {
             throw new Error('Folder must have a UID');
         }
         
+        console.log('📁 saveSingleFolderBG: Saving folder', folder.uid, folder.name);
+        
         const folderKey = `${STORAGE_KEYS.FOLDER_PREFIX}${folder.uid}`;
         const now = Date.now();
         
@@ -403,6 +423,10 @@ const saveSingleFolderBG = async (folder, forceUpdateTimestamp = false) => {
         const foldersIndex = await loadFoldersIndexBG();
         const folderSize = JSON.stringify(folder).length;
         
+        // Preserve existing order if not provided in the folder data
+        const existingOrder = foldersIndex[folder.uid]?.order;
+        const folderOrder = folder.order !== undefined ? folder.order : existingOrder;
+        
         foldersIndex[folder.uid] = {
             name: folder.name,
             type: 'folder',
@@ -411,7 +435,8 @@ const saveSingleFolderBG = async (folder, forceUpdateTimestamp = false) => {
             collectionCount: collectionCount,
             lastUpdated: lastUpdated,
             createdOn: folder.createdOn || now,
-            size: folderSize
+            size: folderSize,
+            order: folderOrder // Include order in index for proper sorting
         };
         
         await browser.storage.local.set({
@@ -431,6 +456,8 @@ const loadAllFoldersBG = async () => {
     try {
         const index = await loadFoldersIndexBG();
         
+        console.log('📁 loadAllFoldersBG: Folders index has', Object.keys(index).length, 'entries');
+        
         if (Object.keys(index).length === 0) {
             return [];
         }
@@ -444,9 +471,23 @@ const loadAllFoldersBG = async () => {
         uids.forEach(uid => {
             const key = `${STORAGE_KEYS.FOLDER_PREFIX}${uid}`;
             if (results[key]) {
-                folders.push(results[key]);
+                // Include order from index if not in folder data
+                const folder = results[key];
+                if (folder.order === undefined && index[uid].order !== undefined) {
+                    folder.order = index[uid].order;
+                }
+                folders.push(folder);
             }
         });
+        
+        // Sort by order before returning
+        folders.sort((a, b) => {
+            const aOrder = a.order !== undefined ? a.order : 999999;
+            const bOrder = b.order !== undefined ? b.order : 999999;
+            return aOrder - bOrder;
+        });
+        
+        console.log('📁 loadAllFoldersBG: Loaded', folders.length, 'folders (sorted by order)');
         
         return folders;
         
@@ -459,21 +500,65 @@ const loadAllFoldersBG = async () => {
 // Update all folders from sync data
 const updateAllFoldersBG = async (folders) => {
     try {
+        logSyncOperation('info', 'updateAllFoldersBG starting', { folderCount: folders?.length || 0 });
+        
         if (!folders || folders.length === 0) {
+            logSyncOperation('info', 'updateAllFoldersBG: No folders to update');
             return true;
         }
         
+        // IMPORTANT: Save folders SEQUENTIALLY to avoid race condition on folders index
+        // Each saveSingleFolderBG loads, updates, and saves the index
+        // Running in parallel would cause overwrites
+        let successCount = 0;
+        for (const folder of folders) {
+            const success = await saveSingleFolderBG(folder);
+            if (success) successCount++;
+        }
         
-        // Update each folder individually using new system
-        const savePromises = folders.map(folder => saveSingleFolderBG(folder));
-        const results = await Promise.all(savePromises);
-        
-        const successCount = results.filter(Boolean).length;
+        logSyncOperation('info', 'updateAllFoldersBG completed', { 
+            successCount, 
+            totalCount: folders.length,
+            allSuccess: successCount === folders.length 
+        });
         
         return successCount === folders.length;
         
     } catch (error) {
-        console.error('📁 Background: Failed to update folders:', error);
+        logSyncOperation('error', 'updateAllFoldersBG failed', { error: error.message });
+        return false;
+    }
+};
+
+// Delete a single folder in background script
+const deleteSingleFolderBG = async (uid) => {
+    try {
+        if (!uid) {
+            console.error('Background: Cannot delete folder - no UID provided');
+            return false;
+        }
+        
+        logSyncOperation('info', 'deleteSingleFolderBG: Deleting folder', { uid });
+        
+        const folderKey = `${STORAGE_KEYS.FOLDER_PREFIX}${uid}`;
+        
+        // Remove folder data
+        await browser.storage.local.remove(folderKey);
+        
+        // Update folders index
+        const foldersIndex = await loadFoldersIndexBG();
+        if (foldersIndex[uid]) {
+            delete foldersIndex[uid];
+            await browser.storage.local.set({
+                [STORAGE_KEYS.FOLDERS_INDEX]: foldersIndex
+            });
+        }
+        
+        logSyncOperation('info', 'deleteSingleFolderBG: Folder deleted successfully', { uid });
+        return true;
+        
+    } catch (error) {
+        logSyncOperation('error', 'deleteSingleFolderBG failed', { uid, error: error.message });
         return false;
     }
 };
@@ -529,6 +614,23 @@ async function handleRequest(url, options = null, maxRetries = 3, delay = 1000) 
 // Enhanced logging for debugging sync issues
 function logSyncOperation(level, message, data = {}) {
     const timestamp = new Date().toISOString();
+    
+    // Format data for better console readability - convert objects to readable strings
+    const formatDataForLog = (obj) => {
+        if (!obj || Object.keys(obj).length === 0) return '';
+        try {
+            const parts = [];
+            for (const [key, value] of Object.entries(obj)) {
+                if (value !== undefined && value !== null) {
+                    parts.push(`${key}=${typeof value === 'object' ? JSON.stringify(value) : value}`);
+                }
+            }
+            return parts.length > 0 ? ` | ${parts.join(', ')}` : '';
+        } catch (e) {
+            return ` | ${JSON.stringify(obj)}`;
+        }
+    };
+    
     const logEntry = {
         timestamp,
         level,
@@ -539,7 +641,8 @@ function logSyncOperation(level, message, data = {}) {
     
     // Only log errors and critical info, skip routine success messages
     if (level === 'error' || (level === 'info' && message.includes('Acquired') === false && message.includes('Released') === false && message.includes('Created pre-sync backup') === false)) {
-        console[level === 'error' ? 'error' : 'log'](`[SYNC ${level.toUpperCase()}] ${message}`, data);
+        const formattedData = formatDataForLog(data);
+        console[level === 'error' ? 'error' : 'log'](`[SYNC ${level.toUpperCase()}] ${message}${formattedData}`);
     }
     
     // Store recent logs for debugging
@@ -823,8 +926,38 @@ async function getNewAccessToken() {
         const { oauth2 } = browser.runtime.getManifest();
         const clientId = oauth2.client_id;
         const keysUrl = browser.runtime.getURL('api-keys.json');
-        const response = await fetch(keysUrl);
-        const { clientSecret } = await response.json();
+        
+        let clientSecret;
+        try {
+            const response = await fetch(keysUrl);
+            if (!response.ok) {
+                logSyncOperation('error', 'Failed to load api-keys.json - sync credentials not configured', {
+                    status: response.status
+                });
+                return false;
+            }
+            const keys = await response.json();
+            clientSecret = keys.clientSecret;
+            
+            // Check if credentials are actually configured
+            if (!clientSecret || clientSecret.trim() === '') {
+                logSyncOperation('error', 'OAuth client secret is not configured in api-keys.json - sync will not work until credentials are added', {
+                    hint: 'For development, add your Google OAuth credentials to chrome/api-keys.json'
+                });
+                await browser.storage.local.set({ 
+                    syncAuthError: {
+                        type: 'missing_credentials',
+                        message: 'Sync credentials not configured. Please contact the developer or configure api-keys.json for development.',
+                        timestamp: Date.now()
+                    }
+                });
+                return false;
+            }
+        } catch (fetchError) {
+            logSyncOperation('error', 'Failed to fetch api-keys.json', { error: fetchError.message });
+            return false;
+        }
+        
         const { googleRefreshToken } = await browser.storage.local.get('googleRefreshToken');
         
         if (!googleRefreshToken) {
@@ -873,19 +1006,44 @@ async function getNewAccessToken() {
             
             if (tokenResponse.status === 400 && errorData.error === 'invalid_grant') {
                 // Refresh token is invalid/expired - user needs to re-authenticate
-                logSyncOperation('error', 'Refresh token is invalid or expired, clearing auth data', {
-                    error: errorData.error_description || 'Invalid grant'
+                logSyncOperation('error', 'Refresh token is invalid or expired - please sign out and sign back in to restore sync', {
+                    error: errorData.error_description || 'Invalid grant',
+                    action: 'User must re-authenticate'
                 });
                 
-                // Clear invalid tokens but keep user info for UI purposes
+                // Clear invalid tokens and set a flag for the UI to detect
                 await browser.storage.local.remove(['googleToken', 'googleRefreshToken', 'tokenExpiryTime']);
+                await browser.storage.local.set({ 
+                    syncAuthError: {
+                        type: 'invalid_grant',
+                        message: 'Your sync session has expired. Please sign out and sign back in to continue syncing.',
+                        timestamp: Date.now()
+                    }
+                });
+                return false;
+            } else if (tokenResponse.status === 401) {
+                // Unauthorized - token completely invalid
+                logSyncOperation('error', 'Authentication failed (401) - please sign out and sign back in', {
+                    status: tokenResponse.status,
+                    error: errorData.error || 'Unauthorized'
+                });
+                
+                await browser.storage.local.remove(['googleToken', 'googleRefreshToken', 'tokenExpiryTime']);
+                await browser.storage.local.set({ 
+                    syncAuthError: {
+                        type: 'unauthorized',
+                        message: 'Authentication failed. Please sign out and sign back in.',
+                        timestamp: Date.now()
+                    }
+                });
                 return false;
             } else {
-                // Other errors might be temporary
-                logSyncOperation('error', 'Token refresh failed with error', {
+                // Other errors might be temporary (network issues, rate limiting, etc.)
+                logSyncOperation('error', 'Token refresh failed - will retry automatically', {
                     status: tokenResponse.status,
                     error: errorData.error || 'Unknown error',
-                    description: errorData.error_description
+                    description: errorData.error_description || 'No description',
+                    retryable: true
                 });
                 return false;
             }
@@ -995,9 +1153,14 @@ async function removeToken(token) {
 
 async function getOrCreateSyncFile(token) {
     const { syncFileId } = await browser.storage.sync.get('syncFileId');
+    console.log('🔑 getOrCreateSyncFile: Current syncFileId from storage.sync:', syncFileId || 'NOT FOUND');
+    
     if (syncFileId) {
+        console.log('🔑 getOrCreateSyncFile: Using existing syncFileId from storage.sync');
         return;
     }
+    
+    console.log('🔑 getOrCreateSyncFile: Searching Google Drive for appSettings.json');
     const url = "https://www.googleapis.com/drive/v3/files/?corpora=user&spaces=appDataFolder&fields=files(id)&q=name='appSettings.json'&pageSize=1&orderBy=modifiedByMeTime desc";
     const response = await handleRequest(url, {
         mode: 'cors',
@@ -1010,12 +1173,15 @@ async function getOrCreateSyncFile(token) {
     });
     if (response) {
         if (response.files.length === 0) {
+            console.log('🔑 getOrCreateSyncFile: No existing file found, creating new sync file');
             await _createNewSyncFile(token);
         } else {
+            console.log('🔑 getOrCreateSyncFile: Found existing file in Google Drive:', response.files[0].id);
             await browser.storage.sync.set({ syncFileId: response.files[0].id });
         }
         return true;
     }
+    console.log('🔑 getOrCreateSyncFile: Failed to search/create sync file');
     return false;
 }
 
@@ -1099,6 +1265,33 @@ async function updateRemote(token, collections = null, skipLock = false) {
             return false;
         }
         
+        // 🛡️ SAFETY CHECK: Prevent pushing empty data when server has data
+        // This prevents new/empty devices from accidentally wiping existing collections
+        const localCollectionCount = dataToSync.tabsArray ? dataToSync.tabsArray.length : 0;
+        if (localCollectionCount === 0) {
+            // Check if server has data before we overwrite it with nothing
+            const { syncFileId } = await browser.storage.sync.get('syncFileId');
+            if (syncFileId) {
+                try {
+                    const serverTimestamp = await _getServerFileTimestamp(token, syncFileId);
+                    if (serverTimestamp && serverTimestamp > 0) {
+                        logSyncOperation('error', 'SAFETY BLOCK: Refusing to push empty data to server - server has existing data', {
+                            serverTimestamp,
+                            localCollectionCount: 0,
+                            action: 'Use loadFromServer to download existing data first'
+                        });
+                        return false;
+                    }
+                } catch (checkError) {
+                    logSyncOperation('error', 'SAFETY BLOCK: Cannot verify server state before pushing empty data - aborting', {
+                        error: checkError.message
+                    });
+                    return false;
+                }
+            }
+            logSyncOperation('info', 'Pushing empty data to server (server appears empty or new)');
+        }
+        
         await getOrCreateSyncFile(token);
         const { syncFileId } = await browser.storage.sync.get('syncFileId');
         
@@ -1165,6 +1358,14 @@ async function _loadSettingsFile(token, fileId) {
         
         logSyncOperation('info', 'Loading sync file from server', { fileId });
         const data = await handleRequest(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, init);
+        
+        logSyncOperation('info', 'Raw server response received', { 
+            dataType: typeof data,
+            isObject: data && typeof data === 'object',
+            hasTabsArray: data && !!data.tabsArray,
+            hasFoldersArray: data && !!data.foldersArray,
+            foldersCount: data && data.foldersArray ? data.foldersArray.length : 'N/A'
+        });
         
         if (data === false) {
             logSyncOperation('error', 'Failed to load sync file from server');
@@ -1330,8 +1531,29 @@ async function getTokens(code) {
     const { oauth2 } = browser.runtime.getManifest();
     const clientId = oauth2.client_id;
     const keysUrl = browser.runtime.getURL('api-keys.json');
-    const response = await fetch(keysUrl);
-    const { clientSecret } = await response.json();
+    
+    let clientSecret;
+    try {
+        const response = await fetch(keysUrl);
+        if (!response.ok) {
+            console.error('Failed to load api-keys.json - sync credentials not configured');
+            return false;
+        }
+        const keys = await response.json();
+        clientSecret = keys.clientSecret;
+        
+        if (!clientSecret || clientSecret.trim() === '') {
+            console.error('OAuth client secret is not configured in api-keys.json - login will fail');
+            logSyncOperation('error', 'Cannot complete login - OAuth credentials not configured', {
+                hint: 'Add Google OAuth credentials to chrome/api-keys.json'
+            });
+            return false;
+        }
+    } catch (fetchError) {
+        console.error('Failed to fetch api-keys.json:', fetchError);
+        return false;
+    }
+    
     const requestBody = {
         code: code,
         client_id: clientId,
@@ -1347,8 +1569,11 @@ async function getTokens(code) {
         body: JSON.stringify(requestBody)
     }
     const data = await handleRequest('https://oauth2.googleapis.com/token', options);
-    await browser.storage.local.set({ googleToken: data.access_token, googleRefreshToken: data.refresh_token });
-    return data ? data.access_token : false;
+    if (data && data.access_token) {
+        await browser.storage.local.set({ googleToken: data.access_token, googleRefreshToken: data.refresh_token });
+        return data.access_token;
+    }
+    return false;
 }
 
 function createAuthEndpoint() {
@@ -1416,6 +1641,12 @@ async function updateCollection(collection, windowId) {
             return null;
         }
         
+        // Detect if this collection was saved from an incognito window
+        const isFromIncognito = window.incognito === true;
+        
+        // Count how many tabs are from incognito (in case of mixed scenarios)
+        const incognitoTabCount = tabs.filter(t => t.incognito === true).length;
+        
         let allChromeGroups;
         if (browser.tabGroups) {
             allChromeGroups = await browser.tabGroups.query({ windowId: windowId });
@@ -1434,7 +1665,11 @@ async function updateCollection(collection, windowId) {
                 const params = Object.fromEntries(urlParams.entries());
                 t.url = params?.url || t.url;
             }
-            return t;
+            // Store incognito status per tab for reference
+            return {
+                ...t,
+                wasIncognito: t.incognito === true
+            };
         })
         
         const newItem = {
@@ -1446,7 +1681,11 @@ async function updateCollection(collection, windowId) {
             createdOn: collection.createdOn, // Preserve original creation time
             lastUpdated: collection.lastUpdated, // Preserve existing timestamp for now
             lastOpened: collection.lastOpened, // Preserve last opened timestamp
-            window: window
+            parentId: collection.parentId, // Preserve folder assignment (fixes eject bug)
+            window: window,
+            // Store incognito metadata for restoration
+            savedFromIncognito: isFromIncognito,
+            incognitoTabCount: incognitoTabCount
         };
         
         return applyUid(newItem);
@@ -1535,20 +1774,50 @@ async function syncData(token) {
                 return false;
             }
         } else {
-        logSyncOperation('info', 'Local data is newer, updating remote', { 
-            serverTimestamp, 
-            localTimestamp,
-            isConflict 
-        });
-        
-        if (isConflict) {
-            // Potential conflict - create additional backup
-            await createPreSyncBackup('conflict-before-local-update');
-        }
-        
-        // Pass skipLock=true since syncData already holds the lock
-        const result = await updateRemote(token, null, true);
-        return result !== false;
+            // Local data claims to be newer - but verify we actually have data before pushing
+            const localCollections = await loadAllCollectionsBG(true);
+            const localCollectionCount = localCollections ? localCollections.length : 0;
+            
+            // 🛡️ SAFETY CHECK: If local is "newer" but EMPTY, and server has data,
+            // this is likely a new device with wrong timestamp - download instead
+            if (localCollectionCount === 0 && serverTimestamp > 0) {
+                logSyncOperation('error', 'SAFETY BLOCK: Local claims newer but has no data while server has data - downloading instead', {
+                    localTimestamp,
+                    serverTimestamp,
+                    localCollectionCount: 0,
+                    action: 'Downloading from server to prevent data loss'
+                });
+                
+                // Force download from server to prevent data loss
+                const tabsArray = await _loadSettingsFile(token, syncFileId);
+                if (tabsArray !== false && tabsArray.length > 0) {
+                    const updateSuccess = await updateAllCollectionsBG(tabsArray);
+                    if (updateSuccess) {
+                        await browser.storage.local.set({ 
+                            localTimestamp: serverTimestamp 
+                        });
+                        logSyncOperation('success', 'Safety download completed - recovered data from server');
+                        return true;
+                    }
+                }
+                return false;
+            }
+            
+            logSyncOperation('info', 'Local data is newer, updating remote', { 
+                serverTimestamp, 
+                localTimestamp,
+                localCollectionCount,
+                isConflict 
+            });
+            
+            if (isConflict) {
+                // Potential conflict - create additional backup
+                await createPreSyncBackup('conflict-before-local-update');
+            }
+            
+            // Pass skipLock=true since syncData already holds the lock
+            const result = await updateRemote(token, null, true);
+            return result !== false;
         }
         
     } catch (error) {
@@ -1732,13 +2001,20 @@ const migrateIncomingSyncData = async (data) => {
             }
             
             // BACKWARDS COMPATIBILITY: Ensure all collections have lastUpdated timestamps
-            const normalizedCollections = data.tabsArray.map(collection => {
+            logSyncOperation('info', 'Processing collections from sync data', {
+                count: data.tabsArray.length,
+                collectionOrders: data.tabsArray.map(c => ({ name: c.name, order: c.order, parentId: c.parentId }))
+            });
+            
+            const normalizedCollections = data.tabsArray.map((collection, idx) => {
                 const fallbackTimestamp = collection.createdOn || Date.now();
                 return {
                     ...collection,
                     // Ensure lastUpdated exists, fallback to createdOn
                     lastUpdated: collection.lastUpdated !== null && collection.lastUpdated !== undefined ? collection.lastUpdated : fallbackTimestamp,
-                    lastOpened: collection.lastOpened !== null && collection.lastOpened !== undefined ? collection.lastOpened : null
+                    lastOpened: collection.lastOpened !== null && collection.lastOpened !== undefined ? collection.lastOpened : null,
+                    // Preserve order from sync data (don't add fallback - let sorting logic handle it)
+                    order: collection.order
                 };
             });
             
@@ -1747,20 +2023,53 @@ const migrateIncomingSyncData = async (data) => {
             
             // Update folders if they exist in the sync data
             let foldersSuccess = true;
+            logSyncOperation('info', 'Checking for folders in sync data', {
+                hasFoldersArray: !!data.foldersArray,
+                isArray: Array.isArray(data.foldersArray),
+                foldersCount: data.foldersArray ? data.foldersArray.length : 0
+            });
+            
+            // Get current local folders to detect deletions
+            const localFoldersIndex = await loadFoldersIndexBG();
+            const localFolderUids = Object.keys(localFoldersIndex);
+            const serverFolderUids = (data.foldersArray || []).map(f => f.uid);
+            
+            // Find folders that exist locally but not on server (deleted on another device)
+            const foldersToDelete = localFolderUids.filter(uid => !serverFolderUids.includes(uid));
+            
+            if (foldersToDelete.length > 0) {
+                logSyncOperation('info', 'Deleting folders not present on server', { 
+                    count: foldersToDelete.length,
+                    folderUids: foldersToDelete 
+                });
+                
+                for (const folderUid of foldersToDelete) {
+                    await deleteSingleFolderBG(folderUid);
+                }
+            }
+            
             if (data.foldersArray && Array.isArray(data.foldersArray) && data.foldersArray.length > 0) {
+                logSyncOperation('info', 'Processing folders from sync data', { 
+                    count: data.foldersArray.length,
+                    folderOrders: data.foldersArray.map(f => ({ name: f.name, order: f.order }))
+                });
                 
                 // BACKWARDS COMPATIBILITY: Ensure all folders have lastUpdated timestamps
-                const normalizedFolders = data.foldersArray.map(folder => {
+                const normalizedFolders = data.foldersArray.map((folder, idx) => {
                     const fallbackTimestamp = folder.createdOn || Date.now();
                     return {
                         ...folder,
                         // Ensure lastUpdated exists, fallback to createdOn
-                        lastUpdated: folder.lastUpdated !== null && folder.lastUpdated !== undefined ? folder.lastUpdated : fallbackTimestamp
+                        lastUpdated: folder.lastUpdated !== null && folder.lastUpdated !== undefined ? folder.lastUpdated : fallbackTimestamp,
+                        // Preserve order from sync data, or use array index as fallback
+                        order: folder.order !== undefined ? folder.order : idx
                     };
                 });
                 
                 foldersSuccess = await updateAllFoldersBG(normalizedFolders);
+                logSyncOperation('info', 'Folders update completed', { success: foldersSuccess, count: normalizedFolders.length });
             } else {
+                logSyncOperation('info', 'No folders in sync data to process');
             }
             
             if (collectionsSuccess && foldersSuccess) {
@@ -1901,9 +2210,10 @@ const prepareSyncDataForUpload = async (collections, useIncrementalSync = false)
             isIncrementalSync: false
         };
         
-        // Only log for debug mode
-        if (globalThis.DEBUG_STORAGE) {
-        }
+        console.log('📤 prepareSyncDataForUpload: Preparing sync data with', tabsArray.length, 'collections and', foldersArray.length, 'folders');
+        console.log('📤 prepareSyncDataForUpload: Folder order:', foldersArray.map(f => ({ name: f.name, order: f.order })));
+        console.log('📤 prepareSyncDataForUpload: Collection order:', tabsArray.map(c => ({ name: c.name, order: c.order, parentId: c.parentId })));
+        
         return syncData;
         
     } catch (error) {

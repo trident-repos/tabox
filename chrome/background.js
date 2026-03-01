@@ -313,6 +313,21 @@ async function handleRemoteUpdate(retryCount = 0, maxRetries = 2) {
       return false;
     }
     
+    // 🛡️ SAFETY CHECK: Early detection of empty local data
+    // This prevents wasting resources on operations that will be blocked anyway
+    const localCollections = await loadAllCollectionsBG(true);
+    const localCollectionCount = localCollections ? localCollections.length : 0;
+    
+    if (localCollectionCount === 0) {
+      // Check if this looks like a newly initialized device
+      const { localTimestamp } = await browser.storage.local.get('localTimestamp');
+      if (!localTimestamp || localTimestamp === 0) {
+        logSyncOperation('info', 'Skipping remote update - device appears newly initialized with no local data');
+        return true; // Return true to prevent retry loops - this is expected state for new devices
+      }
+      logSyncOperation('info', 'Local data is empty - remote update will verify server state before proceeding');
+    }
+    
     const token = await getAuthToken();
     if (token === false) {
       if (retryCount < maxRetries) {
@@ -456,7 +471,33 @@ function shouldDiscardTab(tab) {
 
 const isNewWindow = window => window?.tabs?.length === 1 && (!window?.tabs[0].url || window?.tabs[0].url.indexOf('://newtab') > 0);
 
+// Helper function to check if extension can access incognito
+async function canAccessIncognito() {
+  try {
+    // Try to query incognito windows - if this works, we have permission
+    const incognitoWindows = await browser.windows.getAll({ windowTypes: ['normal'] });
+    // Check if any incognito windows exist and we can see them
+    // If the extension can't access incognito, incognito windows won't appear
+    return true; // Extension is at least allowed in spanning mode
+  } catch (error) {
+    return false;
+  }
+}
+
+// Helper function to check if user has enabled incognito access
+async function isIncognitoEnabled() {
+  try {
+    // This returns true if extension is allowed in incognito mode by user
+    const isAllowed = await browser.extension.isAllowedIncognitoAccess();
+    return isAllowed;
+  } catch (error) {
+    console.warn('Could not check incognito access:', error);
+    return false;
+  }
+}
+
 // Optimized openTabs function for better performance with large collections
+// Now with incognito-aware restoration
 async function openTabs(collection, window, newWindow = null) {
   const startTime = Date.now();
   const totalTabs = collection.tabs.length;
@@ -465,6 +506,15 @@ async function openTabs(collection, window, newWindow = null) {
   if (totalTabs === 0) {
     return true;
   }
+  
+  // Check if collection was saved from incognito
+  const wasFromIncognito = collection.savedFromIncognito === true;
+  
+  // The window is already created by the caller (frontend) - including incognito if applicable
+  // We just need to detect if the passed window is incognito for proper handling
+  const isIncognitoWindow = window.incognito === true;
+  const incognitoRestoreAttempted = wasFromIncognito && newWindow !== null;
+  const incognitoRestoreSuccess = wasFromIncognito && isIncognitoWindow;
   
   // Load settings once upfront
   const [
@@ -480,8 +530,18 @@ async function openTabs(collection, window, newWindow = null) {
   const duplicateUrls = chkIgnoreDuplicates ? new Set(currentUrlsInWindow) : new Set();
   const runtimeUrl = browser.runtime.getURL('deferedLoading.html');
   
+  // URLs that cannot be opened in incognito mode
+  const INCOGNITO_BLOCKED_PREFIXES = [
+    'chrome://',
+    'chrome-extension://',
+    'edge://',
+    'about:',
+    'file://' // File URLs may be blocked depending on settings
+  ];
+  
   // Pre-process all tabs to avoid repeated work
   const tabsToCreate = [];
+  const skippedIncognitoTabs = [];
   const firstTabUpdate = isNewWindow(window);
   
   for (let index = 0; index < totalTabs; index++) {
@@ -492,8 +552,24 @@ async function openTabs(collection, window, newWindow = null) {
       continue;
     }
     
+    // Skip URLs that can't be opened in incognito windows
+    if (isIncognitoWindow) {
+      const isBlockedUrl = INCOGNITO_BLOCKED_PREFIXES.some(prefix => 
+        tabInGrp.url.toLowerCase().startsWith(prefix)
+      );
+      if (isBlockedUrl) {
+        skippedIncognitoTabs.push({
+          url: tabInGrp.url,
+          title: tabInGrp.title,
+          reason: 'URL type not allowed in incognito'
+        });
+        continue;
+      }
+    }
+    
     // Pre-calculate deferred URL
-    const shouldDefer = chkEnableTabDiscard && shouldDiscardTab(tabInGrp);
+    // Note: Don't use deferred loading in incognito as extension pages may have issues
+    const shouldDefer = !isIncognitoWindow && chkEnableTabDiscard && shouldDiscardTab(tabInGrp);
     const finalUrl = shouldDefer 
       ? `${runtimeUrl}?url=${encodeURIComponent(tabInGrp.url)}&favicon=${encodeURIComponent(tabInGrp?.favIconUrl || '')}`
       : tabInGrp.url;
@@ -512,6 +588,12 @@ async function openTabs(collection, window, newWindow = null) {
       isFirstTab: index === 0 && firstTabUpdate,
       originalIndex: index
     });
+  }
+  
+  // Log skipped tabs if any
+  if (skippedIncognitoTabs.length > 0) {
+    console.warn(`Skipped ${skippedIncognitoTabs.length} tabs that cannot be opened in incognito:`, 
+      skippedIncognitoTabs.map(t => t.url));
   }
   
   
@@ -585,26 +667,449 @@ async function openTabs(collection, window, newWindow = null) {
   }
   
   // Apply chrome groups and tracking
+  // Note: Tab groups are not supported in incognito windows
   try {
-    await Promise.all([
-      applyChromeGroupSettings(window.id, collection),
-      addCollectionToTrack(collection.uid, window.id)
-    ]);
+    if (!isIncognitoWindow) {
+      await Promise.all([
+        applyChromeGroupSettings(window.id, collection),
+        addCollectionToTrack(collection.uid, window.id)
+      ]);
+    } else {
+      // Only track the collection, skip tab groups in incognito
+      await addCollectionToTrack(collection.uid, window.id);
+      if (collection.chromeGroups && collection.chromeGroups.length > 0) {
+        console.log('Note: Tab groups are not supported in incognito windows - tabs restored ungrouped');
+      }
+    }
   } catch (groupError) {
     console.error('Error applying chrome groups or tracking:', groupError);
   }
   
-  return successCount > 0; // Return true if at least one tab was created successfully
+  // Return detailed result object for UI feedback
+  return {
+    success: successCount > 0,
+    tabsOpened: successCount,
+    tabsFailed: errorCount,
+    skippedForIncognito: skippedIncognitoTabs.length,
+    wasFromIncognito: wasFromIncognito,
+    restoredToIncognito: incognitoRestoreSuccess,
+    incognitoAttempted: incognitoRestoreAttempted,
+    isIncognitoWindow: isIncognitoWindow
+  };
 }
+
+// Helper to generate UID with fallback (in case background-utils.js isn't fully loaded)
+const generateUidSafe = () => {
+    if (typeof generateUid === 'function') {
+        return generateUid();
+    }
+    // Fallback implementation
+    return (crypto && crypto.randomUUID) ? 
+        crypto.randomUUID() : 
+        Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+};
+
+// Helper to apply UIDs with fallback
+const applyUidSafe = (item) => {
+    if (typeof applyUid === 'function') {
+        return applyUid(item);
+    }
+    // Fallback: just return item as-is if applyUid isn't available
+    // (tabs may already have UIDs from export)
+    return item;
+};
+
+// Helper function to generate unique names for imports
+const generateUniqueNameBG = async (originalName, type = 'collection') => {
+    try {
+        let existingNames = [];
+        if (type === 'collection') {
+            const collections = await loadAllCollectionsBG(true);
+            existingNames = (collections || []).map(c => c.name);
+        } else if (type === 'folder') {
+            const folders = await loadAllFoldersBG();
+            existingNames = (folders || []).map(f => f.name);
+        }
+
+        // If name doesn't exist, return it as-is
+        if (!existingNames.includes(originalName)) {
+            return originalName;
+        }
+
+        // Find the next available number
+        let counter = 1;
+        let newName = `${originalName} (${counter})`;
+        
+        while (existingNames.includes(newName)) {
+            counter++;
+            newName = `${originalName} (${counter})`;
+        }
+        
+        return newName;
+    } catch (error) {
+        console.error('Error in generateUniqueNameBG:', error);
+        // Return original name with timestamp to ensure uniqueness
+        return `${originalName} (${Date.now()})`;
+    }
+};
+
+// Background import handler - survives popup close
+const handleImportDataBG = async (parsed) => {
+    console.log('[Import] handleImportDataBG called with data type:', 
+        parsed?.type || (Array.isArray(parsed) ? 'array' : (parsed?.tabs ? 'single_collection' : 'unknown')));
+    
+    try {
+        // Verify required functions are available (from background-utils.js)
+        if (typeof saveSingleCollectionBG !== 'function') {
+            console.error('[Import] saveSingleCollectionBG function not found - background-utils.js may not be loaded');
+            return { success: false, error: 'Import system not initialized properly. Please reload the extension.' };
+        }
+        
+        if (!parsed) {
+            return { success: false, error: 'No data provided for import' };
+        }
+        
+        let result;
+        
+        // Detect import type based on structure
+        if (parsed.type === 'full_export') {
+            console.log('[Import] Detected full_export format');
+            result = await handleFullExportImportBG(parsed);
+        } else if (parsed.type === 'folder') {
+            console.log('[Import] Detected folder format');
+            result = await handleFolderImportBG(parsed);
+        } else if (Array.isArray(parsed)) {
+            console.log('[Import] Detected legacy array format with', parsed.length, 'collections');
+            result = await handleLegacyCollectionsImportBG(parsed);
+        } else if (parsed.tabs && Array.isArray(parsed.tabs)) {
+            console.log('[Import] Detected single collection format with', parsed.tabs.length, 'tabs');
+            result = await handleSingleCollectionImportBG(parsed);
+        } else {
+            console.log('[Import] Unknown format, keys:', Object.keys(parsed || {}));
+            return { success: false, error: 'Unknown import format. Expected full_export, folder, array of collections, or single collection with tabs.' };
+        }
+        
+        console.log('[Import] Result:', result?.success ? 'success' : 'failed', result?.error || '');
+        return result;
+        
+    } catch (error) {
+        console.error('[Import] Error in handleImportDataBG:', error);
+        return { success: false, error: error?.message || String(error) || 'Unknown error occurred during import' };
+    }
+};
+
+const handleFullExportImportBG = async (exportData) => {
+    try {
+        let importedCollections = [];
+        let importedFolders = [];
+
+        // Import folders first
+        if (exportData.folders && exportData.folders.length > 0) {
+            for (const folder of exportData.folders) {
+                // Generate new UID to avoid conflicts
+                const newFolderUid = generateUidSafe();
+                const uniqueName = await generateUniqueNameBG(folder.name, 'folder');
+                const importedFolder = {
+                    ...folder,
+                    uid: newFolderUid,
+                    name: uniqueName,
+                    lastUpdated: Date.now()
+                };
+                
+                await saveSingleFolderBG(importedFolder);
+                importedFolders.push(importedFolder);
+                
+                // Update collections that belong to this folder
+                if (exportData.collections) {
+                    exportData.collections.forEach(collection => {
+                        if (collection.parentId === folder.uid) {
+                            collection.parentId = newFolderUid;
+                        }
+                    });
+                }
+            }
+        }
+
+        // Import collections
+        if (exportData.collections && exportData.collections.length > 0) {
+            for (const collection of exportData.collections) {
+                // Generate new UID to avoid conflicts
+                const newCollectionUid = generateUidSafe();
+                const uniqueName = await generateUniqueNameBG(collection.name, 'collection');
+                // Build clean collection object
+                let importedCollection = {
+                    uid: newCollectionUid,
+                    name: uniqueName,
+                    tabs: collection.tabs || [],
+                    chromeGroups: collection.chromeGroups || [],
+                    color: collection.color || 'default',
+                    createdOn: Date.now(),
+                    lastUpdated: Date.now(),
+                    lastOpened: null,
+                    parentId: collection.parentId || null,
+                    order: collection.order
+                };
+
+                // Apply UIDs to tabs if needed
+                if (importedCollection.tabs && importedCollection.tabs.length > 0 && !('uid' in importedCollection.tabs[0])) {
+                    importedCollection = applyUidSafe(importedCollection);
+                }
+
+                await saveSingleCollectionBG(importedCollection);
+                importedCollections.push(importedCollection);
+            }
+        }
+
+        // Sync legacy storage for backwards compatibility
+        await forceLegacyStorageSync();
+        
+        // Also update the legacy tabsArray directly
+        const allCollections = await loadAllCollectionsBG(true);
+        console.log('[Import] Total collections after full export import:', allCollections?.length);
+        await browser.storage.local.set({ 
+            tabsArray: allCollections,
+            localTimestamp: Date.now()
+        });
+
+        return {
+            success: true,
+            foldersImported: importedFolders.length,
+            collectionsImported: importedCollections.length,
+            firstCollectionUid: importedCollections.length > 0 ? importedCollections[0].uid : null,
+            message: `Successfully imported ${importedFolders.length} folders and ${importedCollections.length} collections`
+        };
+    } catch (error) {
+        console.error('Error importing full export:', error);
+        return { success: false, error: error?.message || String(error) };
+    }
+};
+
+const handleFolderImportBG = async (folderData) => {
+    try {
+        // Import the folder with new UID
+        const newFolderUid = generateUidSafe();
+        const uniqueFolderName = await generateUniqueNameBG(folderData.folder.name, 'folder');
+        const importedFolder = {
+            ...folderData.folder,
+            uid: newFolderUid,
+            name: uniqueFolderName,
+            lastUpdated: Date.now()
+        };
+        
+        await saveSingleFolderBG(importedFolder);
+
+        // Import collections in the folder
+        let importedCollections = [];
+        if (folderData.collections && folderData.collections.length > 0) {
+            for (const collection of folderData.collections) {
+                const newCollectionUid = generateUidSafe();
+                const uniqueCollectionName = await generateUniqueNameBG(collection.name, 'collection');
+                // Build clean collection object
+                let importedCollection = {
+                    uid: newCollectionUid,
+                    name: uniqueCollectionName,
+                    tabs: collection.tabs || [],
+                    chromeGroups: collection.chromeGroups || [],
+                    color: collection.color || 'default',
+                    createdOn: Date.now(),
+                    lastUpdated: Date.now(),
+                    lastOpened: null,
+                    parentId: newFolderUid,
+                    order: collection.order
+                };
+
+                if (importedCollection.tabs && importedCollection.tabs.length > 0 && !('uid' in importedCollection.tabs[0])) {
+                    importedCollection = applyUidSafe(importedCollection);
+                }
+
+                await saveSingleCollectionBG(importedCollection);
+                importedCollections.push(importedCollection);
+            }
+        }
+
+        // Sync legacy storage for backwards compatibility
+        await forceLegacyStorageSync();
+        
+        // Also update the legacy tabsArray directly
+        const allCollections = await loadAllCollectionsBG(true);
+        console.log('[Import] Total collections after folder import:', allCollections?.length);
+        await browser.storage.local.set({ 
+            tabsArray: allCollections,
+            localTimestamp: Date.now()
+        });
+
+        return {
+            success: true,
+            foldersImported: 1,
+            collectionsImported: importedCollections.length,
+            firstCollectionUid: importedCollections.length > 0 ? importedCollections[0].uid : null,
+            message: `Successfully imported folder "${importedFolder.name}" with ${importedCollections.length} collections`
+        };
+    } catch (error) {
+        console.error('Error importing folder:', error);
+        return { success: false, error: error?.message || String(error) };
+    }
+};
+
+const handleLegacyCollectionsImportBG = async (collections) => {
+    try {
+        // Legacy array of collections import - apply unique names
+        const importedCollections = [];
+        for (const collection of collections) {
+            const uniqueName = await generateUniqueNameBG(collection.name, 'collection');
+            const newCollectionUid = generateUidSafe();
+            // Build clean collection object
+            let importedCollection = {
+                uid: newCollectionUid,
+                name: uniqueName,
+                tabs: collection.tabs || [],
+                chromeGroups: collection.chromeGroups || [],
+                color: collection.color || 'default',
+                createdOn: Date.now(),
+                lastUpdated: Date.now(),
+                lastOpened: null,
+                parentId: null,
+                order: collection.order
+            };
+            
+            // Apply UIDs to tabs if needed
+            if (importedCollection.tabs && importedCollection.tabs.length > 0 && !('uid' in importedCollection.tabs[0])) {
+                importedCollection = applyUidSafe(importedCollection);
+            }
+            
+            await saveSingleCollectionBG(importedCollection);
+            importedCollections.push(importedCollection);
+        }
+        
+        // Sync legacy storage for backwards compatibility
+        await forceLegacyStorageSync();
+        
+        // Also update the legacy tabsArray directly
+        const allCollections = await loadAllCollectionsBG(true);
+        await browser.storage.local.set({ 
+            tabsArray: allCollections,
+            localTimestamp: Date.now()
+        });
+        
+        return {
+            success: true,
+            foldersImported: 0,
+            collectionsImported: importedCollections.length,
+            firstCollectionUid: importedCollections.length > 0 ? importedCollections[0].uid : null,
+            message: `Successfully imported ${importedCollections.length} collections`
+        };
+    } catch (error) {
+        console.error('Error importing legacy collections:', error);
+        return { success: false, error: error?.message || String(error) };
+    }
+};
+
+const handleSingleCollectionImportBG = async (collection) => {
+    try {
+        console.log('[Import] handleSingleCollectionImportBG - starting import for:', collection?.name);
+        
+        if (!collection || !collection.name) {
+            return { success: false, error: 'Invalid collection data: missing name' };
+        }
+        
+        // Legacy single collection import with unique name
+        const uniqueName = await generateUniqueNameBG(collection.name, 'collection');
+        console.log('[Import] Generated unique name:', uniqueName);
+        
+        // Always generate a new UID to avoid conflicts with existing collections
+        const newCollectionUid = generateUidSafe();
+        console.log('[Import] Generated new UID:', newCollectionUid);
+        
+        // Build clean collection object - only include the properties we need
+        // Exclude 'window' and other runtime properties that shouldn't be persisted
+        let importedCollection = {
+            uid: newCollectionUid,
+            name: uniqueName,
+            tabs: collection.tabs || [],
+            chromeGroups: collection.chromeGroups || [],
+            color: collection.color || 'default',
+            createdOn: Date.now(),
+            lastUpdated: Date.now(),
+            lastOpened: null,
+            parentId: null,
+            order: collection.order
+        };
+        
+        // Apply UIDs to tabs if needed
+        if (importedCollection.tabs && importedCollection.tabs.length > 0 && !('uid' in importedCollection.tabs[0])) {
+            console.log('[Import] Applying UIDs to tabs');
+            importedCollection = applyUidSafe(importedCollection);
+        }
+        
+        console.log('[Import] Saving collection with', importedCollection.tabs?.length || 0, 'tabs');
+        console.log('[Import] Collection data:', JSON.stringify({
+            uid: importedCollection.uid,
+            name: importedCollection.name,
+            tabCount: importedCollection.tabs?.length,
+            color: importedCollection.color
+        }));
+        
+        const saveResult = await saveSingleCollectionBG(importedCollection);
+        console.log('[Import] Save result:', saveResult);
+        
+        if (!saveResult) {
+            return { success: false, error: 'Failed to save collection to storage' };
+        }
+        
+        // Verify the save worked by trying to load the collection back
+        const verifyCollection = await loadSingleCollectionBG(newCollectionUid);
+        console.log('[Import] Verification - collection exists in storage:', !!verifyCollection);
+        if (!verifyCollection) {
+            return { success: false, error: 'Collection was saved but could not be verified in storage' };
+        }
+        
+        // Sync legacy storage for backwards compatibility
+        console.log('[Import] Syncing legacy storage');
+        await forceLegacyStorageSync();
+        
+        // Also update the legacy tabsArray directly to ensure it's there
+        const allCollections = await loadAllCollectionsBG(true);
+        console.log('[Import] Total collections after import:', allCollections?.length);
+        await browser.storage.local.set({ 
+            tabsArray: allCollections,
+            localTimestamp: Date.now()
+        });
+        
+        console.log('[Import] Import completed successfully');
+        return {
+            success: true,
+            foldersImported: 0,
+            collectionsImported: 1,
+            firstCollectionUid: importedCollection.uid,
+            message: `Successfully imported collection "${importedCollection.name}"`
+        };
+    } catch (error) {
+        console.error('[Import] Error importing single collection:', error);
+        return { success: false, error: error?.message || String(error) || 'Failed to import collection' };
+    }
+};
 
 try {
   browser.runtime.onMessage.addListener(async (request) => {
     if (request.type === 'checkSyncStatus') {
       try {
-        const { googleUser } = await browser.storage.local.get('googleUser');
+        const { googleUser, syncAuthError } = await browser.storage.local.get(['googleUser', 'syncAuthError']);
         if (!googleUser) {
           logSyncOperation('info', 'No Google user found for sync status check');
           return Promise.resolve(false);
+        }
+        
+        // Check if there's a persistent auth error that requires user action
+        if (syncAuthError && syncAuthError.type) {
+          logSyncOperation('info', 'Auth error detected, user needs to re-authenticate', {
+            errorType: syncAuthError.type,
+            age: Date.now() - syncAuthError.timestamp
+          });
+          return Promise.resolve({ 
+            ...googleUser, 
+            syncStatus: 'auth_required',
+            syncError: syncAuthError.message || 'Please sign out and sign back in to restore sync.'
+          });
         }
         
         // Try to get auth token with improved error handling
@@ -617,9 +1122,18 @@ try {
             // Return user info so UI doesn't completely disable sync
             return Promise.resolve({ ...googleUser, syncStatus: 'auth_refreshing' });
           } else {
-            logSyncOperation('error', 'No auth token and no refresh token available');
-            return Promise.resolve(false);
+            logSyncOperation('error', 'No auth token and no refresh token available - user must re-authenticate');
+            return Promise.resolve({ 
+              ...googleUser, 
+              syncStatus: 'auth_required',
+              syncError: 'Your sync session has expired. Please sign out and sign back in.'
+            });
           }
+        }
+        
+        // Clear any previous auth error since we got a valid token
+        if (syncAuthError) {
+          await browser.storage.local.remove('syncAuthError');
         }
         
         // Try to verify sync file exists/create it
@@ -751,6 +1265,9 @@ try {
           return Promise.resolve(false);
         }
         
+        // Clear any previous auth errors since we got new tokens
+        await browser.storage.local.remove('syncAuthError');
+        
         const syncFileResult = await getOrCreateSyncFile(token);
         if (syncFileResult === false) {
           console.error('Failed to create/find sync file during login');
@@ -763,12 +1280,25 @@ try {
           return Promise.resolve(false);
         }
         
+        // 🛡️ SAFETY: Check local data state before initial sync
+        // For new devices (empty local data), we should prioritize downloading from server
+        const localCollections = await loadAllCollectionsBG(true);
+        const localCollectionCount = localCollections ? localCollections.length : 0;
+        
+        logSyncOperation('info', 'Login successful - starting initial sync', {
+          localCollectionCount,
+          isNewDevice: localCollectionCount === 0
+        });
+        
         const syncResult = await syncData(token);
         if (syncResult === false) {
           console.error('Initial sync failed during login');
           // Still return user as login was successful, sync can be retried
+          logSyncOperation('error', 'Initial sync failed during login - user can retry manually');
         } else if (syncResult === 'already_in_progress') {
           logSyncOperation('info', 'Sync already in progress during login, will complete separately');
+        } else {
+          logSyncOperation('success', 'Initial sync completed successfully during login');
         }
         
         return Promise.resolve(user);
@@ -778,8 +1308,24 @@ try {
       }
     }
     if (request.type === 'openTabs') {
-      await openTabs(request.collection, request.window);
-      return Promise.resolve(true);
+      const result = await openTabs(request.collection, request.window, request.newWindow);
+      // Return the detailed result object for UI feedback
+      return Promise.resolve(result);
+    }
+    
+    // Check if incognito access is enabled for user feedback
+    if (request.type === 'checkIncognitoAccess') {
+      try {
+        const isAllowed = await browser.extension.isAllowedIncognitoAccess();
+        return Promise.resolve({ 
+          allowed: isAllowed,
+          message: isAllowed 
+            ? 'Incognito access is enabled' 
+            : 'Enable "Allow in incognito" in extension settings to restore incognito collections to incognito windows'
+        });
+      } catch (error) {
+        return Promise.resolve({ allowed: false, error: error.message });
+      }
     }
 
     if (request.type === 'updateBadge') {
@@ -788,20 +1334,26 @@ try {
     }
 
     if (request.type === 'updateRemote') {
+      console.log('🔄 [SYNC] updateRemote message received - starting sync');
       try {
         // Use throttled sync to prevent multiple simultaneous operations
         const result = await throttleSync(() => handleRemoteUpdate());
         if (result === false && syncThrottleTimeout) {
           // Operation was throttled, return success to prevent error handling
+          console.log('🔄 [SYNC] updateRemote throttled');
           return Promise.resolve(true);
         }
         
         if (result === false) {
+          console.log('🔄 [SYNC] updateRemote FAILED');
           logSyncOperation('error', 'Remote update failed');
+        } else {
+          console.log('🔄 [SYNC] updateRemote SUCCESS');
         }
         // Success is already logged by handleRemoteUpdate(), no need to log again
         return Promise.resolve(result);
       } catch (error) {
+        console.log('🔄 [SYNC] updateRemote EXCEPTION:', error.message);
         logSyncOperation('error', 'Exception in updateRemote', { error: error.message });
         console.error('Exception in updateRemote:', error);
         return Promise.resolve(false);
@@ -809,9 +1361,11 @@ try {
     }
 
     if (request.type === 'loadFromServer') {
+      console.log('🔄 [SYNC] loadFromServer message received');
       try {
         const { googleRefreshToken } = await browser.storage.local.get('googleRefreshToken');
         if (!googleRefreshToken) {
+          console.log('🔄 [SYNC] loadFromServer: No refresh token');
           logSyncOperation('error', 'No refresh token available for loadFromServer');
           return Promise.resolve(false);
         }
@@ -837,15 +1391,27 @@ try {
         }
         
         const newData = await updateLocalDataFromServer(token, request.force);
+        console.log('🔄 [SYNC] loadFromServer result:', newData === false ? 'FAILED' : (newData === 'no_update_needed' ? 'NO_UPDATE_NEEDED' : `SUCCESS (${newData?.length || 0} collections)`));
         if (newData === false) {
-          // Actual error occurred - try remote update as fallback
-          logSyncOperation('info', 'Server load failed, attempting to update remote as fallback');
+          // SAFETY FIX: Do NOT push local data as fallback when server load fails
+          // This was causing data loss when new devices pushed empty data to server
+          // Instead, just log the error and return false - user can retry manually
+          logSyncOperation('error', 'Server load failed - NOT pushing local data as fallback to prevent data loss');
           
-          const updateResult = await handleRemoteUpdate();
-          if (updateResult === false) {
-            logSyncOperation('error', 'Failed to update remote after failed server load');
+          // Only attempt remote update if we have substantial local data (safety check)
+          const localCollections = await loadAllCollectionsBG(true);
+          if (localCollections && localCollections.length > 0) {
+            logSyncOperation('info', 'Local data exists, attempting remote update as fallback', {
+              localCollectionCount: localCollections.length
+            });
+            const updateResult = await handleRemoteUpdate();
+            if (updateResult === false) {
+              logSyncOperation('error', 'Failed to update remote after failed server load');
+            } else {
+              logSyncOperation('success', 'Successfully updated remote after failed server load');
+            }
           } else {
-            logSyncOperation('success', 'Successfully updated remote after failed server load');
+            logSyncOperation('info', 'No local data to push - skipping remote update to prevent data loss');
           }
         } else if (newData === 'no_update_needed') {
           // No update needed - data is already in sync
@@ -903,6 +1469,26 @@ try {
         return Promise.resolve(false);
       }
     }
+
+    // Import data handler - runs in background to survive popup close
+    if (request.type === 'importData') {
+      console.log('[Import] Received importData message');
+      try {
+        const result = await handleImportDataBG(request.data);
+        console.log('[Import] Handler completed, result:', JSON.stringify(result).substring(0, 200));
+        // Ensure we always return a valid result object
+        if (!result) {
+          return Promise.resolve({ success: false, error: 'Import handler returned no result' });
+        }
+        return Promise.resolve(result);
+      } catch (error) {
+        console.error('[Import] Error in importData message handler:', error);
+        return Promise.resolve({ 
+          success: false, 
+          error: error?.message || String(error) || 'Unknown error in import message handler' 
+        });
+      }
+    }
   });
   browser.commands.onCommand.addListener(async (command) => {
     try {
@@ -911,16 +1497,40 @@ try {
       const tabsArray = await loadAllCollectionsBG(true);
       if (!tabsArray || tabsArray.length === 0 || index > tabsArray.length - 1) return;
       
+      const collection = tabsArray[index];
       let window;
       const { chkOpenNewWindow } = await browser.storage.local.get('chkOpenNewWindow');
+      
+      // Check if collection was from incognito and if we should try incognito window
+      const wasFromIncognito = collection.savedFromIncognito === true;
+      let createIncognito = false;
+      
+      if (wasFromIncognito && chkOpenNewWindow) {
+        const incognitoAllowed = await isIncognitoEnabled();
+        createIncognito = incognitoAllowed;
+      }
+      
       if (chkOpenNewWindow) {
-        window = await browser.windows.create({ focused: true });
+        window = await browser.windows.create({ 
+          focused: true,
+          incognito: createIncognito 
+        });
       } else {
         window = await browser.windows.getCurrent({ populate: true, windowTypes: ['normal'] });
       }
       
       window.tabs = await browser.tabs.query({ windowId: window.id });
-      await openTabs(tabsArray[index], window, true);
+      const result = await openTabs(collection, window, chkOpenNewWindow);
+      
+      // Log result for debugging
+      if (result && typeof result === 'object') {
+        if (result.wasFromIncognito && !result.restoredToIncognito) {
+          console.log('Note: Collection was from incognito but restored to normal window');
+        }
+        if (result.skippedForIncognito > 0) {
+          console.log(`Note: ${result.skippedForIncognito} tabs skipped (not allowed in incognito)`);
+        }
+      }
     } catch (error) {
       console.error('Error in keyboard shortcut handler:', error);
     }

@@ -40,6 +40,7 @@ import {
     loadCollectionsIndex,
     loadAllFolders,
     updateFoldersOrder,
+    repairOrphanCollections,
     STORAGE_KEYS,
     CURRENT_STORAGE_VERSION
 } from './utils/storageUtils';
@@ -383,29 +384,37 @@ function App() {
 
   const applyDataFromServer = async (force = false) => {
     setSyncInProgress(true);
+    console.log('🚀 applyDataFromServer: Starting, force=', force);
     browser.runtime.sendMessage({ type: 'loadFromServer', force: force }).then(async (response) => {
+      console.log('🚀 applyDataFromServer: Got response from background:', response);
       if (response !== false) {
         // Use new storage system for server data
         
+        // Load user's sort preferences
+        const { currentSortValue, currentSortAscending } = await browser.storage.local.get(['currentSortValue', 'currentSortAscending']);
+        const sortValue = currentSortValue || 'DATE';
+        const sortAscending = currentSortAscending !== undefined ? currentSortAscending : true;
+        const sortFieldMap = { 'DATE': 'lastUpdated', 'NAME': 'name', 'COLOR': 'color' };
+        const sortBy = sortFieldMap[sortValue] || 'lastUpdated';
+        const sortOrder = sortAscending ? 'asc' : 'desc';
+        
+        console.log('📥 applyDataFromServer: Response type:', typeof response, 'Is array:', Array.isArray(response), 'Length:', response?.length);
+        
         if (response && Array.isArray(response) && response.length > 0) {
+          console.log('📥 applyDataFromServer: Saving', response.length, 'collections from server');
           const success = await batchUpdateCollections(response);
           if (success) {
             // Add a small delay to ensure storage writes are committed
             await new Promise(resolve => setTimeout(resolve, 100));
-            
-            // Load user's sort preferences
-            const { currentSortValue, currentSortAscending } = await browser.storage.local.get(['currentSortValue', 'currentSortAscending']);
-            const sortValue = currentSortValue || 'DATE';
-            const sortAscending = currentSortAscending !== undefined ? currentSortAscending : true;
-            const sortFieldMap = { 'DATE': 'lastUpdated', 'NAME': 'name', 'COLOR': 'color' };
-            const sortBy = sortFieldMap[sortValue] || 'lastUpdated';
-            const sortOrder = sortAscending ? 'asc' : 'desc';
             
             // Reload both collections and folders from storage after sync
             const [updatedCollections, updatedFolders] = await Promise.all([
               loadAllCollections({ metadataOnly: false, sortBy, sortOrder }),
               loadAllFolders({ metadataOnly: false })
             ]);
+            
+            console.log('📥 applyDataFromServer: Loaded', updatedCollections.length, 'collections and', updatedFolders.length, 'folders from storage');
+            console.log('📥 applyDataFromServer: Setting state with folders:', updatedFolders.map(f => f.name));
             
             setSettingsData(updatedCollections);
             setFoldersData(updatedFolders);
@@ -414,12 +423,27 @@ function App() {
             console.error('❌ Failed to save server data');
           }
         } else if (response === 'no_update_needed') {
-          // Don't reload data if sync says nothing changed
-          // The data is already loaded correctly in loadDataWithNewSystem
+          // Sync says nothing changed - but still reload folders in case they were updated by background
+          console.log('📥 applyDataFromServer: No update needed, but reloading folders anyway');
+          const folders = await loadAllFolders({ metadataOnly: false });
+          console.log('📥 applyDataFromServer: Loaded', folders.length, 'folders');
+          setFoldersData(folders);
           setLastSyncTime(Date.now());
         } else {
-          setSettingsData([]);
-          setFoldersData([]);
+          // Server returned empty collections - still load folders from storage
+          // (folders are saved by migrateIncomingSyncData in the background)
+          console.log('📥 applyDataFromServer: Empty response, loading from storage');
+          await new Promise(resolve => setTimeout(resolve, 100));
+          
+          const [updatedCollections, updatedFolders] = await Promise.all([
+            loadAllCollections({ metadataOnly: false, sortBy, sortOrder }),
+            loadAllFolders({ metadataOnly: false })
+          ]);
+          
+          console.log('📥 applyDataFromServer: Loaded', updatedCollections.length, 'collections and', updatedFolders.length, 'folders from storage');
+          
+          setSettingsData(updatedCollections);
+          setFoldersData(updatedFolders);
           setLastSyncTime(Date.now());
         }
       }
@@ -938,6 +962,18 @@ function App() {
 
       await hydrateCollectionsInBatches(metadata, initialBatchSize);
       
+      // Run orphan collection repair in the background (non-blocking)
+      // This fixes collections that have parentId pointing to non-existent folders,
+      // which can happen due to sync issues or folder deletion without proper cleanup.
+      // The UI already shows orphans at root level, this just cleans up the underlying data.
+      repairOrphanCollections().then(result => {
+        if (result.orphansRepaired > 0) {
+          console.log(`🔧 Repaired ${result.orphansRepaired} orphan collection(s) - they are now visible at root level`);
+        }
+      }).catch(err => {
+        console.warn('Non-critical: orphan repair failed:', err);
+      });
+      
     } catch (error) {
       console.error('❌ Failed to load data with new system, falling back to legacy:', error);
       
@@ -1437,6 +1473,7 @@ function App() {
         addFolder={addFolder}
         onViewModeChange={setViewMode}
         onFiltersChange={handleFiltersChange}
+        onDataUpdate={refreshDataAfterFolderOperation}
       />
       <CollectionList
         key={`collection-list-${listKey}`}

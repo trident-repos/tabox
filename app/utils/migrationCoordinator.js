@@ -82,11 +82,13 @@ class MigrationCoordinator {
       // Check if migration has already been completed for this version
       const migrationHistory = await this.getMigrationHistory();
       const currentAppVersion = this.getCurrentAppVersion();
-      
+      // Use major.minor for comparison - patch versions don't need new migrations
+      const majorMinorVersion = this.getMajorMinorVersion(currentAppVersion);
+
       // Always check for color migration needs, regardless of version history
       const needsColorMigration = this.needsColorMigration(currentData);
-      
-      if (migrationHistory.completedVersions && migrationHistory.completedVersions.includes(currentAppVersion)) {
+
+      if (migrationHistory.completedVersions && migrationHistory.completedVersions.includes(majorMinorVersion)) {
         
         // Even if version migration is complete, check if color migration is needed
         if (needsColorMigration) {
@@ -983,15 +985,18 @@ class MigrationCoordinator {
 
   /**
    * Mark migration as completed for current app version
+   * Uses major.minor version so patch updates don't trigger unnecessary migrations
    * @returns {Promise<void>}
    */
   async markMigrationCompleted() {
     try {
       const history = await this.getMigrationHistory();
       const currentAppVersion = this.getCurrentAppVersion();
-      
-      if (!history.completedVersions.includes(currentAppVersion)) {
-        history.completedVersions.push(currentAppVersion);
+      // Save major.minor version - patch versions share migration state
+      const majorMinorVersion = this.getMajorMinorVersion(currentAppVersion);
+
+      if (!history.completedVersions.includes(majorMinorVersion)) {
+        history.completedVersions.push(majorMinorVersion);
       }
       
       history.lastMigrationTimestamp = Date.now();
@@ -1028,6 +1033,17 @@ class MigrationCoordinator {
       console.error('Error getting app version:', error);
       return '3.5.1';
     }
+  }
+
+  /**
+   * Get major.minor version for migration tracking
+   * Patch versions (x.y.Z) don't require new migrations
+   * @param {string} version - Full version string (e.g., "4.0.1")
+   * @returns {string} Major.minor version (e.g., "4.0")
+   */
+  getMajorMinorVersion(version) {
+    const parts = version.split('.');
+    return parts.slice(0, 2).join('.');
   }
 }
 

@@ -159,6 +159,8 @@ exports[`Header -- Sync disabled Header renders correctly - sync disabled 1`] = 
                   >
                     <span
                       data-tooltip-class-name="small-tooltip"
+                      data-tooltip-content="Toggle between light and dark theme"
+                      data-tooltip-id="main-tooltip"
                     >
                       <input
                         class="switch-input"
@@ -226,6 +228,8 @@ exports[`Header -- Sync disabled Header renders correctly - sync disabled 1`] = 
                   >
                     <span
                       data-tooltip-class-name="small-tooltip"
+                      data-tooltip-content="Show the total number of tabs across all collections on the extension icon"
+                      data-tooltip-id="main-tooltip"
                     >
                       <input
                         class="switch-input"
@@ -355,6 +359,8 @@ exports[`Header -- Sync disabled Header renders correctly - sync disabled 1`] = 
                   >
                     <span
                       data-tooltip-class-name="small-tooltip"
+                      data-tooltip-content="Choose whether pinned tabs should be saved when creating a new collection"
+                      data-tooltip-id="main-tooltip"
                     >
                       <input
                         class="switch-input"
@@ -447,6 +453,8 @@ exports[`Header -- Sync disabled Header renders correctly - sync disabled 1`] = 
                   >
                     <span
                       data-tooltip-class-name="small-tooltip"
+                      data-tooltip-content="Skip opening tabs that are already open in the current window"
+                      data-tooltip-id="main-tooltip"
                     >
                       <input
                         class="switch-input"
@@ -486,7 +494,9 @@ exports[`Header -- Sync disabled Header renders correctly - sync disabled 1`] = 
                   >
                     <span
                       data-tooltip-class-name="small-tooltip"
-                      data-tooltip-content="Smart tab loading delays non-essential tabs to improve performance.<br>Automatically avoids deferring media, auth, development, and collaboration sites.<br>Tabs load instantly when you switch to them."
+                      data-tooltip-content="Smart tab loading delays non-essential tabs to improve performance.
+Automatically avoids deferring media, auth, development, and collaboration sites.
+Tabs load instantly when you switch to them."
                       data-tooltip-id="main-tooltip"
                     >
                       <input
@@ -576,7 +586,8 @@ exports[`Header -- Sync disabled Header renders correctly - sync disabled 1`] = 
                   >
                     <span
                       data-tooltip-class-name="small-tooltip"
-                      data-tooltip-content="A tab is considered 'duplicate' <br />if it has the exact same URL as another tab"
+                      data-tooltip-content="A tab is considered 'duplicate'
+if it has the exact same URL as another tab"
                       data-tooltip-id="main-tooltip"
                     >
                       <input
@@ -617,7 +628,8 @@ exports[`Header -- Sync disabled Header renders correctly - sync disabled 1`] = 
                   >
                     <span
                       data-tooltip-class-name="small-tooltip"
-                      data-tooltip-content="A group is considered 'duplicate' <br />if it has the exact same name and color as another group"
+                      data-tooltip-content="A group is considered 'duplicate'
+if it has the exact same name and color as another group"
                       data-tooltip-id="main-tooltip"
                     >
                       <input
@@ -711,7 +723,8 @@ exports[`Header -- Sync disabled Header renders correctly - sync disabled 1`] = 
                   >
                     <span
                       data-tooltip-class-name="small-tooltip"
-                      data-tooltip-content="When opening a collection, track changes<br />to the window and update the collection in the background."
+                      data-tooltip-content="When opening a collection, track changes
+to the window and update the collection in the background."
                       data-tooltip-id="main-tooltip"
                     >
                       <input
@@ -752,7 +765,8 @@ exports[`Header -- Sync disabled Header renders correctly - sync disabled 1`] = 
                   >
                     <span
                       data-tooltip-class-name="small-tooltip"
-                      data-tooltip-content="When adding a new collection, start auto updating<br /> it with changes in the current window."
+                      data-tooltip-content="When adding a new collection, start auto updating
+it with changes in the current window."
                       data-tooltip-id="main-tooltip"
                     >
                       <input
@@ -794,7 +808,8 @@ exports[`Header -- Sync disabled Header renders correctly - sync disabled 1`] = 
                   >
                     <span
                       data-tooltip-class-name="small-tooltip"
-                      data-tooltip-content="When clicking the 'Update' button, this will link<br /> the collection to the window, making it 'active'."
+                      data-tooltip-content="When clicking the 'Update' button, this will link
+the collection to the window, making it 'active'."
                       data-tooltip-id="main-tooltip"
                     >
                       <input

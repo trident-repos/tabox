@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef, useMemo, useEffectEvent } from 'react';
-import { MdDragIndicator, MdCenterFocusWeak } from 'react-icons/md';
+import { MdDragIndicator, MdCenterFocusWeak, MdChevronRight } from 'react-icons/md';
 import { FaPlay } from 'react-icons/fa';
+import { BsIncognito } from 'react-icons/bs';
 import ContextMenu from './ContextMenu';
 import { createCollectionMenuItems } from './utils/contextMenuItems';
 import TimeAgo from 'javascript-time-ago';
@@ -8,11 +9,6 @@ import { useSetAtom, useAtomValue } from 'jotai';
 import { deletingCollectionUidsState, highlightedCollectionUidState, draggingTabState, draggingGroupState } from './atoms/animationsState';
 import { trackingStateVersion } from './atoms/globalAppSettingsState';
 
-import { showSuccessToast, showErrorToast } from './toastHelpers';
-
-import { getBorderColor } from './utils/colorUtils';
-import ExpandedCollectionData from './ExpandedCollectionData';
-import { AutoSaveTextbox } from './AutoSaveTextbox';
 import ColorPicker from './ColorPicker';
 import { useCollectionOperations } from './useCollectionOperations';
 import { browser } from '../static/globals';
@@ -26,8 +22,8 @@ function CollectionListItem(props) {
     const draggingTab = useAtomValue(draggingTabState);
     const draggingGroup = useAtomValue(draggingGroupState);
     const [collectionName, setCollectionName] = useState(props.collection.name);
-    const [isExpanded, setExpanded] = useState(false);
     const [isAutoUpdate, setIsAutoUpdate] = useState(false);
+    const [showAllMatchingTabs, setShowAllMatchingTabs] = useState(false);
     const mountedRef = useRef(true);
     
     // Prevent expansion when dragging a tab or group (unless it's from this collection)
@@ -53,7 +49,6 @@ function CollectionListItem(props) {
         _exportCollectionToFile,
         _handleUpdate,
         _handleOpenTabs,
-        _handleExpand,
         _handleFocusWindow,
         _handleStopTracking
     } = useCollectionOperations({
@@ -62,9 +57,7 @@ function CollectionListItem(props) {
         updateCollection: props.updateCollection,
         updateRemoteData: props.updateRemoteData,
         setIsAutoUpdate,
-        setExpanded,
         index: props.index,
-        isExpanded,
         setDeletingCollectionUids,
         addCollection: props.addCollection,
         onDataUpdate: props.onDataUpdate
@@ -124,34 +117,17 @@ function CollectionListItem(props) {
         await props.updateCollection(newCollectionItem, true); // Manual color change - trigger lightning effect
     }
 
-    // All collection operations are now handled by the shared hook
-
-    const _handleExpandWithNameReset = () => {
-        _handleExpand();
-        setCollectionName(props.collection.name);
-    };
-
-    const handleCollectionNameChange = (val) => {
-        setCollectionName(val.trim());
-        if (val.trim() === "") {
-            showErrorToast("Please enter a name for the collection");
-            setCollectionName(props.collection.name);
-            return;
-        }
-        let currentCollection = { ...props.collection };
-        currentCollection.name = val;
-        currentCollection.lastUpdated = Date.now();
-        props.updateCollection(currentCollection, true); // Manual name change - trigger lightning effect
-        showSuccessToast(`Collection name updated to '${val}'!`);
-    }
-
+    // Handle row click to open detail panel
     const _handleRowClick = (e) => {
         e.stopPropagation();
-        // Prevent expansion when dragging a tab or group from another collection
+        // Prevent opening panel when dragging a tab or group from another collection
         if (isDraggingItem && !isDraggingFromThisCollection) {
             return;
         }
-        _handleExpandWithNameReset();
+        // Call onSelect to open the detail panel
+        if (props.onSelect) {
+            props.onSelect(props.collection);
+        }
     };
 
     const totalGroups = props.collection.chromeGroups ? props.collection.chromeGroups.length : 0;
@@ -164,6 +140,18 @@ function CollectionListItem(props) {
         const threeHoursAgo = Date.now() - (3 * 60 * 60 * 1000);
         return props.collection.lastOpened >= threeHoursAgo;
     }, [props.collection.lastOpened]);
+
+    // Check if collection was saved from incognito
+    const wasFromIncognito = props.collection.savedFromIncognito === true;
+
+    // Get first 5 tabs for favicon preview (with title for tooltip)
+    const previewTabs = useMemo(() => {
+        const tabs = props.collection.tabs || [];
+        return tabs.slice(0, 5).filter(tab => tab.favIconUrl).map(tab => ({
+            favIconUrl: tab.favIconUrl,
+            title: tab.title || tab.url || ''
+        }));
+    }, [props.collection.tabs]);
 
     // Helper function to escape regex special characters
     const escapeRegex = (string) => {
@@ -191,26 +179,40 @@ function CollectionListItem(props) {
     const matchingTabsCount = useMemo(() => {
         if (!props.search || !props.search.trim()) return 0;
         const searchRegex = new RegExp(escapeRegex(props.search), 'i');
-        return props.collection.tabs ? props.collection.tabs.filter(tab => 
-            tab.title?.match(searchRegex) || 
+        return props.collection.tabs ? props.collection.tabs.filter(tab =>
+            tab.title?.match(searchRegex) ||
             tab.url?.match(searchRegex)
         ).length : 0;
     }, [props.search, props.collection.tabs]);
 
-    // Auto-expand collections ONLY when tabs match (not when only name matches)
+    // Get the actual matching tabs for inline preview
+    const matchingTabs = useMemo(() => {
+        if (!props.search || !props.search.trim()) return [];
+        const searchRegex = new RegExp(escapeRegex(props.search), 'i');
+        return (props.collection.tabs || []).filter(tab =>
+            tab.title?.match(searchRegex) || tab.url?.match(searchRegex)
+        );
+    }, [props.search, props.collection.tabs]);
+
+    // Reset expanded state when search term changes
     useEffect(() => {
-        if (props.search && props.search.trim()) {
-            if (hasMatchingTabs) {
-                // Auto-expand if search is active and has matching tabs
-                setExpanded(true);
-            } else {
-                // If no tabs match (even if name matches), ensure collection is collapsed
-                // This handles the case where only collection name matches the search
-                setExpanded(false);
-            }
-        }
-        // Note: We don't auto-collapse when search is cleared to preserve user's manual expansion state
-    }, [props.search, hasMatchingTabs]);
+        setShowAllMatchingTabs(false);
+    }, [props.search]);
+
+    // Helper function to highlight matching text in any string
+    const highlightText = (text, search) => {
+        if (!text || !search?.trim()) return null;
+        const searchRegex = new RegExp(escapeRegex(search), 'i');
+        if (!text.match(searchRegex)) return null;
+        const parts = text.split(new RegExp(`(${escapeRegex(search)})`, 'gi'));
+        return parts.map((part, i) =>
+            part.toLowerCase() === search.trim().toLowerCase()
+                ? <span key={i} className="search-match-text">{part}</span>
+                : part || null
+        ).filter(Boolean);
+    };
+
+    // Note: Auto-expand for search removed - now handled by the detail panel
 
     // Helper function to highlight matching text in collection name
     const highlightMatchInName = useMemo(() => {
@@ -246,11 +248,11 @@ function CollectionListItem(props) {
 
     return (
         <DroppableCollection collection={props.collection}>
-            <div 
-                onClick={_handleRowClick} 
-                className={`row setting_row collection-list-item ${isExpanded ? 'expanded' : ''} ${isAutoUpdate && 'active-auto-tracking'} ${isHighlighted ? 'collection-item-highlight' : ''} ${isDeleting ? 'collection-item-deleting' : ''} ${props.lightningEffect ? 'lightning-effect' : ''}`} 
-                style={{ 
-                    ...style, 
+            <div
+                onClick={_handleRowClick}
+                className={`row setting_row collection-list-item ${isAutoUpdate && 'active-auto-tracking'} ${isHighlighted ? 'collection-item-highlight' : ''} ${isDeleting ? 'collection-item-deleting' : ''} ${props.lightningEffect ? 'lightning-effect' : ''} ${matchingTabs.length > 0 ? 'has-matching-tabs' : ''}`}
+                style={{
+                    ...style,
                     border: '2px solid var(--setting-row-border-color)'
                 }}
                 data-in-folder={props.isInFolder ? 'true' : 'false'}
@@ -263,39 +265,39 @@ function CollectionListItem(props) {
                 >
                     <MdDragIndicator />
                 </div>
-            <div className="column color-picker-column">
-                <div style={{ position: 'relative', display: 'flex' }}>
+                
+                <div className="collection-color-picker" onClick={(e) => e.stopPropagation()}>
                     <ColorPicker
                         currentColor={props.collection.color}
-                        tooltip="Choose a color for this collection"
-                        action={handleSaveCollectionColor} />
+                        tooltip="Change collection color"
+                        action={handleSaveCollectionColor}
+                    />
                 </div>
-            </div>
+            
             <div
-                className="column settings_div"
+                className="column settings_div collection-info-column"
                 title={props.collection.name}
             >
                 <div className="collection-name-wrapper">
                     <div className="collection-name">
-                        {isExpanded ?
-                            <div className="edit-collection-wrapper" onClick={(e) => e.stopPropagation()}>
-                                <AutoSaveTextbox
-                                    onChange={setCollectionName}
-                                    maxLength={50}
-                                    initValue={props.collection.name}
-                                    item={props.collection}
-                                    action={handleCollectionNameChange} />
-                            </div>
-                            :
-                            <div className="collection-name-row">
-                                <span className="truncate_box">
-                                    {highlightMatchInName !== null ? highlightMatchInName : props.collection.name}
+                        <div className="collection-name-row">
+                            <span className="truncate_box">
+                                {highlightMatchInName !== null ? highlightMatchInName : props.collection.name}
+                            </span>
+                            {wasFromIncognito && (
+                                <span 
+                                    className="incognito-indicator" 
+                                    title="Saved from incognito window"
+                                    data-tooltip-id="main-tooltip"
+                                    data-tooltip-content="Saved from incognito window"
+                                >
+                                    <BsIncognito size={12} />
                                 </span>
-                                {isRecentlyOpened && (
-                                    <span className="recently-opened-indicator" title="Recently opened (last 3 hours)"></span>
-                                )}
-                            </div>
-                        }
+                            )}
+                            {isRecentlyOpened && (
+                                <span className="recently-opened-indicator" title="Recently opened (last 3 hours)"></span>
+                            )}
+                        </div>
                     </div>
                     <div className="collection-counts">
                         {props.search && props.search.trim() && hasMatchingTabs ? (
@@ -317,9 +319,28 @@ function CollectionListItem(props) {
                     </div>
                 </div>
             </div>
+            
+            {/* Favicon preview */}
+            <div className="collection-favicon-preview" onClick={(e) => e.stopPropagation()}>
+                {previewTabs.slice(0, 4).map((tab, idx) => (
+                    <img
+                        key={idx}
+                        src={tab.favIconUrl}
+                        alt=""
+                        className="preview-favicon"
+                        data-tooltip-id="main-tooltip"
+                        data-tooltip-content={tab.title}
+                        onError={(e) => { e.target.style.display = 'none'; }}
+                    />
+                ))}
+                {props.collection.tabs?.length > 4 && (
+                    <span className="favicon-count">+{props.collection.tabs.length - 4}</span>
+                )}
+            </div>
+            
             <div className="column right_items">
                 <button
-                    className="open-tabs-icon"
+                    className={`open-tabs-icon ${isAutoUpdate ? 'focus-mode' : ''}`}
                     data-tooltip-id="main-tooltip" data-tooltip-content={isAutoUpdate ? "Focus collection window" : "Open collection tabs"}
                     onClick={async (e) => {
                         e.stopPropagation();
@@ -330,7 +351,8 @@ function CollectionListItem(props) {
                         }
                     }}
                 >
-                    {isAutoUpdate ? <MdCenterFocusWeak size={20} /> : <FaPlay />}
+                    {isAutoUpdate ? <MdCenterFocusWeak size={12} /> : <FaPlay size={8} />}
+                    <span>{isAutoUpdate ? 'Focus' : 'Open'}</span>
                 </button>
 
                 <ContextMenu
@@ -344,17 +366,61 @@ function CollectionListItem(props) {
                     })}
                     tooltip="Collection options"
                 />
+                
+                {/* Chevron indicator for panel */}
+                <div className="collection-chevron">
+                    <MdChevronRight size={18} />
                 </div>
             </div>
-            {isExpanded ? (
-                <div className="expanded-wrapper" onClick={(e) => e.stopPropagation()}>
-                    <ExpandedCollectionData
-                        collection={props.collection}
-                        updateCollection={props.updateCollection}
-                        updateRemoteData={props.updateRemoteData}
-                        search={props.search} />
+            </div>
+            {matchingTabs.length > 0 && (
+                <div className="matching-tabs-section" onClick={(e) => e.stopPropagation()}>
+                    {(showAllMatchingTabs ? matchingTabs : matchingTabs.slice(0, 3)).map((tab, idx) => (
+                        <a
+                            key={tab.uid || idx}
+                            className="matching-tab-preview"
+                            href={tab.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={tab.url}
+                            onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                browser.tabs.create({ url: tab.url, active: true });
+                            }}
+                        >
+                            {tab.favIconUrl && (
+                                <img
+                                    src={tab.favIconUrl}
+                                    alt=""
+                                    className="matching-tab-favicon"
+                                    onError={(e) => { e.target.style.display = 'none'; }}
+                                />
+                            )}
+                            <span className="matching-tab-title">
+                                {highlightText(tab.title, props.search) || tab.title}
+                            </span>
+                            <span className="matching-tab-url">
+                                {highlightText(tab.url, props.search) || tab.url}
+                            </span>
+                        </a>
+                    ))}
+                    {matchingTabs.length > 3 && (
+                        <div
+                            className="matching-tabs-more"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setShowAllMatchingTabs(!showAllMatchingTabs);
+                            }}
+                        >
+                            {showAllMatchingTabs
+                                ? 'Show less'
+                                : `+ ${matchingTabs.length - 3} more matching tab${matchingTabs.length - 3 !== 1 ? 's' : ''}...`
+                            }
+                        </div>
+                    )}
                 </div>
-            ) : null}
+            )}
         </div>
         </DroppableCollection>);
 }

@@ -1,11 +1,13 @@
-import React, { memo, useCallback, useMemo } from 'react';
+import React, { memo, useCallback, useMemo, useState } from 'react';
 import { browser } from '../static/globals';
 import { AiFillPushpin } from 'react-icons/ai';
 import { FaVolumeMute } from 'react-icons/fa';
-import { MdDeleteForever, MdOutlineOpenInNew, MdDragIndicator } from 'react-icons/md';
+import { MdDeleteForever, MdOutlineOpenInNew, MdDragIndicator, MdDriveFileMove } from 'react-icons/md';
 import { getColorCode } from './utils';
+import MoveToCollectionModal from './MoveToCollectionModal';
 
 const TabRow = memo(({ tab, updateCollection, collection, group = null, isDragging = false, search = null }) => {
+    const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
     const fallbackFavicon = './images/favicon-fallback.png';
 
     // Helper function to escape regex special characters
@@ -235,7 +237,17 @@ const TabRow = memo(({ tab, updateCollection, collection, group = null, isDraggi
                             handleOpenTab(tab); 
                         }}
                     >
-                        <MdOutlineOpenInNew size="16px" color="var(--primary-color)" />
+                        <MdOutlineOpenInNew size="14px" color="var(--primary-color)" />
+                    </button>
+                    <button 
+                        className="action-button move-tab" 
+                        data-tooltip-id="main-tooltip" data-tooltip-content="Move to another collection" 
+                        onClick={(e) => { 
+                            e.stopPropagation(); 
+                            setIsMoveModalOpen(true); 
+                        }}
+                    >
+                        <MdDriveFileMove size="14px" color="#E67E22" />
                     </button>
                     <button 
                         className="action-button del-tab" 
@@ -245,10 +257,20 @@ const TabRow = memo(({ tab, updateCollection, collection, group = null, isDraggi
                             handleTabDelete(); 
                         }}
                     >
-                        <MdDeleteForever color="#B64A4A" size="20" />
+                        <MdDeleteForever color="#B64A4A" size="14px" />
                     </button>
                 </div>
             </div>
+            
+            {isMoveModalOpen && (
+                <MoveToCollectionModal
+                    isOpen={isMoveModalOpen}
+                    onClose={() => setIsMoveModalOpen(false)}
+                    tab={tab}
+                    sourceCollection={collection}
+                    updateCollection={updateCollection}
+                />
+            )}
         </div>
     );
 });
