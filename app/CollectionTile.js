@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo, useRef, useEffectEvent } from 'react';
 import { MdCenterFocusWeak } from 'react-icons/md';
 import { FaTrash, FaPlay } from 'react-icons/fa';
+import { BsIncognito } from 'react-icons/bs';
 
 import ContextMenu from './ContextMenu';
 import { createCollectionMenuItems } from './utils/contextMenuItems';
@@ -110,7 +111,12 @@ function CollectionTile(props) {
             e.target.closest('.menu-icon')) {
             return;
         }
-        _handleOpenTabs();
+        // Open detail panel if onSelect is provided, otherwise open tabs
+        if (props.onSelect) {
+            props.onSelect(props.collection);
+        } else {
+            _handleOpenTabs();
+        }
     };
 
     const timeAgo = useMemo(() => new TimeAgo('en-US'), []);
@@ -138,6 +144,39 @@ function CollectionTile(props) {
         return props.collection.lastOpened >= threeHoursAgo;
     }, [props.collection.lastOpened]);
 
+    // Check if collection was saved from incognito
+    const wasFromIncognito = props.collection.savedFromIncognito === true;
+
+    // Helper function to escape regex special characters
+    const escapeRegex = (string) => {
+        return string.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+    };
+
+    // Highlight matching text in collection name for search
+    const highlightMatchInName = useMemo(() => {
+        if (!props.search || !props.search.trim()) return null;
+        const name = props.collection.name;
+        const searchTerm = props.search.trim();
+        const searchRegex = new RegExp(escapeRegex(searchTerm), 'i');
+        if (!name || !name.match(searchRegex)) return null;
+        const parts = name.split(new RegExp(`(${escapeRegex(searchTerm)})`, 'gi'));
+        return parts.map((part, index) => {
+            if (part.toLowerCase() === searchTerm.toLowerCase()) {
+                return <span key={`match-${index}`} className="search-match-text">{part}</span>;
+            }
+            return part ? <span key={`text-${index}`}>{part}</span> : null;
+        }).filter(Boolean);
+    }, [props.search, props.collection.name]);
+
+    // Count matching tabs for badge
+    const matchingTabsCount = useMemo(() => {
+        if (!props.search || !props.search.trim()) return 0;
+        const searchRegex = new RegExp(escapeRegex(props.search), 'i');
+        return (props.collection.tabs || []).filter(tab =>
+            tab.title?.match(searchRegex) || tab.url?.match(searchRegex)
+        ).length;
+    }, [props.search, props.collection.tabs]);
+
     return (
         <DroppableCollection collection={props.collection}>
             <div
@@ -154,8 +193,18 @@ function CollectionTile(props) {
             <div className="tile-header">
                 <div className="tile-title-row">
                     <h3 className="tile-title" title={collectionName}>
-                        {collectionName}
+                        {highlightMatchInName !== null ? highlightMatchInName : collectionName}
                     </h3>
+                    {wasFromIncognito && (
+                        <span 
+                            className="incognito-indicator" 
+                            title="Saved from incognito window"
+                            data-tooltip-id="main-tooltip"
+                            data-tooltip-content="Saved from incognito window"
+                        >
+                            <BsIncognito />
+                        </span>
+                    )}
                     {isRecentlyOpened && (
                         <span className="recently-opened-indicator" title="Recently opened (last 3 hours)"></span>
                     )}
@@ -187,6 +236,13 @@ function CollectionTile(props) {
                     {formatTimeAgo(props.collection.lastUpdated || props.collection.createdOn)}
                 </div>
             </div>
+
+            {/* Matching tabs badge */}
+            {matchingTabsCount > 0 && (
+                <div className="tile-matching-badge">
+                    {matchingTabsCount} tab match{matchingTabsCount !== 1 ? 'es' : ''}
+                </div>
+            )}
 
             {/* Action buttons */}
             <div 

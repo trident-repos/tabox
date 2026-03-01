@@ -253,12 +253,12 @@ function FolderContainer({
 
     // Styles
     const containerStyle = {
-        margin: '1px 0', // Reduced folder spacing
-        padding: '2px 5px', // Reduced folder padding
-        borderRadius: '8px',
+        margin: '1px 0 1px 10px', // Tighter spacing between folders
+        padding: '1px 4px', // Minimal folder padding
+        borderRadius: '6px',
         background: 'var(--setting-row-bg-color)',
         border: '1px solid var(--folder-border-color, var(--setting-row-border-color))',
-        width: '99%', // Match collection row width
+        width: 'calc(99% - 10px)', // Match collection row width with indent
         opacity: isDragging ? 0.6 : isDeleting ? 0 : 1,
         transform: isDragging ? 'scale(1.02)' : isDeleting ? 'translateX(-100px)' : 'translateX(0)',
         transition: isDeleting ? 'all 0.4s ease-out' : 'all 0.2s ease',
@@ -273,16 +273,16 @@ function FolderContainer({
         justifyContent: 'space-between',
         padding: '0', // Adjusted since container now has padding
         cursor: 'pointer',
-        borderRadius: '8px',
+        borderRadius: '6px',
         transition: 'background-color 0.2s ease',
-        minHeight: '40px' // Match collection row min-height
+        minHeight: '32px' // Match collection row height exactly
     };
 
     const titleSectionStyle = {
         display: 'flex',
         alignItems: 'center',
         flex: 1,
-        gap: '12px'
+        gap: '6px'
     };
 
     // Disable drag when folder is expanded OR when something else is being dragged
@@ -299,22 +299,22 @@ function FolderContainer({
         alignItems: 'center',
         color: dragDisabled ? 'var(--text-disabled-color)' : 'var(--text-secondary-color)',
         cursor: dragDisabled ? 'default' : (isDragging ? 'grabbing' : 'grab'),
-        padding: '4px',
-        marginRight: '8px',
+        padding: '2px',
+        marginRight: '4px',
         borderRadius: '4px',
         transition: 'all 0.2s ease',
         userSelect: 'none',
         touchAction: dragDisabled ? 'auto' : 'none',
         opacity: dragDisabled ? 0.5 : 1,
-        width: '24px',
-        height: '24px',
+        width: '20px',
+        height: '20px',
         justifyContent: 'center',
         flexShrink: 0
     };
 
     // Icon style that updates with folder color changes
     const iconStyle = React.useMemo(() => ({
-        fontSize: '28px',
+        fontSize: '20px',
         color: folderColor,
         transition: 'color 0.2s ease'
     }), [folderColor]);
@@ -323,10 +323,10 @@ function FolderContainer({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        height: '28px',
-        width: '28px',
+        height: '20px',
+        width: '20px',
         flexShrink: 0,
-        marginLeft: '-15px' // Reduce gap between drag handle and icon
+        marginLeft: '-10px' // Reduce gap between drag handle and icon
     };
 
     const folderInfoStyle = {
@@ -351,7 +351,7 @@ function FolderContainer({
     const actionsStyle = {
         display: 'flex',
         alignItems: 'center',
-        gap: '8px',
+        gap: '4px',
         opacity: 0.7,
         transition: 'opacity 0.2s ease'
     };
@@ -363,8 +363,8 @@ function FolderContainer({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        width: '34px',
-        height: '34px',
+        width: '26px',
+        height: '26px',
         borderRadius: '4px',
         color: 'var(--text-secondary-color)',
         transition: 'all 0.2s ease',
@@ -374,12 +374,12 @@ function FolderContainer({
 
 
     const childrenContainerStyle = {
-        padding: localExpanded ? '8px' : '0',
+        padding: localExpanded ? '6px' : '0',
         maxHeight: localExpanded ? 'none' : '0',
         overflow: 'hidden',
         transition: 'all 0.3s ease',
         background: 'var(--section-bg-color)',
-        borderRadius: '0 0 8px 8px'
+        borderRadius: '0 0 6px 6px'
     };
 
     // Custom color list for folders (simpler than tab groups)
@@ -762,9 +762,9 @@ function FolderContainer({
                                 <div style={{
                                     display: 'inline-flex',
                                     alignItems: 'center',
-                                    height: '28px',
-                                    minWidth: '120px',
-                                    maxWidth: '200px'
+                                    height: '24px',
+                                    minWidth: '80px',
+                                    maxWidth: '180px'
                                 }}>
                                     <span style={{
                                         fontSize: '13px',
@@ -784,6 +784,40 @@ function FolderContainer({
                 </div>
                 
                 <div style={actionsStyle} className="folder-actions" onClick={(e) => e.stopPropagation()}>
+                    {hasTrackedCollections ? (
+                        <div 
+                            className="folder-tracking-indicator"
+                            data-tooltip-id="main-tooltip" data-tooltip-content="This folder contains auto-updating collections"
+                            data-tooltip-class-name="small-tooltip"
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                width: '18px',
+                                height: '18px',
+                                borderRadius: '50%',
+                                background: 'linear-gradient(45deg, rgba(22, 152, 226, 0.9), rgba(139, 93, 255, 0.9), rgba(255, 140, 66, 0.9))',
+                                border: '1px solid rgba(139, 93, 255, 0.6)',
+                                position: 'relative',
+                                overflow: 'hidden',
+                                boxShadow: '0 0 10px rgba(139, 93, 255, 0.4), inset 0 0 6px rgba(255, 255, 255, 0.2)',
+                                flexShrink: 0
+                            }}
+                        >
+                            <div className="folder-tracking-smoke"></div>
+                        </div>
+                    ) : (
+                        <button
+                            className="open-tabs-icon folder-open-btn"
+                            onClick={handlePlayFolder}
+                            data-tooltip-id="main-tooltip" data-tooltip-content={`Open ${collectionCount} collection${collectionCount !== 1 ? 's' : ''} in this folder`}
+                            data-tooltip-class-name="small-tooltip"
+                            disabled={collectionCount === 0}
+                        >
+                            <MdPlayArrow size={10} />
+                            <span>Open</span>
+                        </button>
+                    )}
                     <ColorPicker
                         colorList={folderColorChart}
                         tooltip="Choose a color for this folder"
@@ -791,70 +825,6 @@ function FolderContainer({
                         action={handleSaveFolderColor}
                         size="small"
                     />
-                    <div style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        width: '28px',
-                        height: '28px',
-                        flexShrink: 0 // Prevent container from shrinking
-                    }}>
-                        {hasTrackedCollections ? (
-                            <div 
-                                className="folder-tracking-indicator"
-                                data-tooltip-id="main-tooltip" data-tooltip-content="This folder contains auto-updating collections"
-                                data-tooltip-class-name="small-tooltip"
-                                style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    width: '20px',
-                                    height: '20px',
-                                    borderRadius: '50%',
-                                    background: 'linear-gradient(45deg, rgba(22, 152, 226, 0.9), rgba(139, 93, 255, 0.9), rgba(255, 140, 66, 0.9))',
-                                    border: '1px solid rgba(139, 93, 255, 0.6)',
-                                    position: 'relative',
-                                    overflow: 'hidden',
-                                    boxShadow: '0 0 12px rgba(139, 93, 255, 0.4), inset 0 0 8px rgba(255, 255, 255, 0.2)'
-                                }}
-                            >
-                                <div className="folder-tracking-smoke"></div>
-                            </div>
-                        ) : (
-                            <button
-                                style={{
-                                    background: 'none',
-                                    border: 'none',
-                                    cursor: 'pointer',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    width: '28px',
-                                    height: '28px',
-                                    borderRadius: '4px',
-                                    color: 'var(--text-secondary-color)',
-                                    transition: 'all 0.2s ease',
-                                    opacity: 0.7
-                                }}
-                                onClick={handlePlayFolder}
-                                data-tooltip-id="main-tooltip" data-tooltip-content={`Open ${collectionCount} collection${collectionCount !== 1 ? 's' : ''} in this folder`}
-                                data-tooltip-class-name="small-tooltip"
-                                onMouseEnter={(e) => {
-                                    e.target.style.opacity = '1';
-                                    e.target.style.backgroundColor = 'var(--setting-row-hover-bg)';
-                                    e.target.style.color = 'var(--text-color)';
-                                }}
-                                onMouseLeave={(e) => {
-                                    e.target.style.opacity = '0.7';
-                                    e.target.style.backgroundColor = 'transparent';
-                                    e.target.style.color = 'var(--text-secondary-color)';
-                                }}
-                                disabled={collectionCount === 0}
-                            >
-                                <MdPlayArrow size={16} />
-                            </button>
-                        )}
-                    </div>
                     <ContextMenu
                         menuItems={[
                             {

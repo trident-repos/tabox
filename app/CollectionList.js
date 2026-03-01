@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
 import { useAtomValue, useAtom } from 'jotai';
 import './CollectionList.css';
 import { themeState, searchState } from './atoms/globalAppSettingsState';
@@ -6,6 +6,7 @@ import { draggingTabState, draggingGroupState } from './atoms/animationsState';
 import { BsSearch } from 'react-icons/bs';
 import { browser } from '../static/globals';
 import CollapsableSection from './CollapsableSection';
+import CollectionDetailPanel from './CollectionDetailPanel';
 import {
     DndContext,
     closestCenter,
@@ -64,7 +65,7 @@ const areCollectionItemPropsEqual = (prev, next) => {
         prev.lightningEffect === next.lightningEffect &&
         prev.search === next.search &&
         prev.isInFolder === next.isInFolder &&
-        prev.expanded === next.expanded
+        prev.onSelect === next.onSelect
     );
 };
 
@@ -79,7 +80,8 @@ const areCollectionTilePropsEqual = (prev, next) => {
         prev.activeId === next.activeId &&
         prev.lightningEffect === next.lightningEffect &&
         prev.isInFolder === next.isInFolder &&
-        prev.search === next.search
+        prev.search === next.search &&
+        prev.onSelect === next.onSelect
     );
 };
 
@@ -104,9 +106,84 @@ function CollectionList({
     const [activeFolder, setActiveFolder] = useState(null);
     const [draggingTab, setDraggingTab] = useAtom(draggingTabState);
     const [draggingGroup, setDraggingGroup] = useAtom(draggingGroupState);
+
+    // Refs to track current drag state (for mouseup handler to avoid race conditions)
+    const draggingTabRef = useRef(null);
+    const draggingGroupRef = useRef(null);
+
+    // Keep refs in sync with state — useLayoutEffect ensures refs are updated
+    // synchronously before the browser paints, so the mouseup handler always
+    // reads the latest drag state (useEffect was too late on fast drag-and-drop)
+    useLayoutEffect(() => {
+        draggingTabRef.current = draggingTab;
+    }, [draggingTab]);
+
+    useLayoutEffect(() => {
+        draggingGroupRef.current = draggingGroup;
+    }, [draggingGroup]);
+
+    // State for detail panel
+    const [selectedCollection, setSelectedCollection] = useState(null);
+    const [isPanelOpen, setIsPanelOpen] = useState(false);
+    
+    // Refs to always have latest collections/folders data (avoids stale closure in event handlers)
+    const collectionsRef = useRef(collections);
+    const foldersRef = useRef(folders);
+    
+    // Keep refs updated
+    useEffect(() => {
+        collectionsRef.current = collections;
+        foldersRef.current = folders;
+    }, [collections, folders]);
+    
+    // Helper function to find a collection by UID, including those inside folders
+    // Uses refs to always have latest data
+    const findCollectionByUid = useCallback((uid) => {
+        const currentCollections = collectionsRef.current;
+        const currentFolders = foldersRef.current;
+        
+        // First check root-level collections
+        const rootCollection = currentCollections.find(c => c.uid === uid);
+        if (rootCollection) return { collection: rootCollection, folder: null };
+        
+        // Then check collections inside folders
+        for (const folder of currentFolders) {
+            if (folder.collections) {
+                const folderCollection = folder.collections.find(c => c.uid === uid);
+                if (folderCollection) return { collection: folderCollection, folder };
+            }
+        }
+        
+        return { collection: null, folder: null };
+    }, []); // No dependencies - uses refs
     
     const listContainerRef = useRef(null);
     const rootCollectionsSectionRef = useRef(null);
+    
+    // Handle collection selection for panel
+    const handleSelectCollection = (collection) => {
+        setSelectedCollection(collection);
+        setIsPanelOpen(true);
+    };
+    
+    // Handle panel close
+    const handleClosePanel = () => {
+        setIsPanelOpen(false);
+        // Delay clearing the collection to allow close animation
+        setTimeout(() => {
+            setSelectedCollection(null);
+        }, 300);
+    };
+    
+    // Keep selected collection in sync with collections data
+    useEffect(() => {
+        if (selectedCollection && collections.length > 0) {
+            const updatedCollection = collections.find(c => c.uid === selectedCollection.uid);
+            if (updatedCollection) {
+                setSelectedCollection(updatedCollection);
+            }
+        }
+    }, [collections, selectedCollection?.uid]);
     
     
     // Create unified items array with folders and root-level collections only
@@ -130,9 +207,15 @@ function CollectionList({
             }
         });
         
-        // Add root-level collections (no parentId)
-        const rootCollections = collections.filter(c => !c.parentId);
-        rootCollections.forEach(collection => {
+        // Add root-level collections (no parentId) and orphan collections (parentId points to non-existent folder)
+        // This ensures collections don't become invisible if their parent folder was deleted or never synced
+        const folderUids = new Set(folders.map(f => f.uid));
+        const rootAndOrphanCollections = collections.filter(c => {
+            if (!c.parentId) return true; // True root collection
+            if (!folderUids.has(c.parentId)) return true; // Orphan collection
+            return false;
+        });
+        rootAndOrphanCollections.forEach(collection => {
             items.push({
                 ...collection,
                 itemType: 'collection',
@@ -144,9 +227,25 @@ function CollectionList({
         return items;
     }, [collections, folders, hasActiveFilters]);
 
+    // Get set of valid folder UIDs for orphan detection
+    const validFolderUids = useMemo(() => {
+        return new Set(folders.map(f => f.uid));
+    }, [folders]);
+
+    // Root collections include:
+    // 1. Collections with no parentId (true root collections)
+    // 2. "Orphan" collections - those with parentId pointing to non-existent folders
+    //    This fixes the bug where collections become invisible after v4.0 update if their
+    //    parent folder was deleted or never synced properly
     const rootCollections = useMemo(() => {
-        return collections.filter(collection => !collection.parentId);
-    }, [collections]);
+        return collections.filter(collection => {
+            // No parentId = root collection
+            if (!collection.parentId) return true;
+            // Has parentId but folder doesn't exist = orphan, show at root
+            if (!validFolderUids.has(collection.parentId)) return true;
+            return false;
+        });
+    }, [collections, validFolderUids]);
 
     // Calculate visible folders - folders that have matching collections or when no filters are active
     const visibleFolders = useMemo(() => {
@@ -342,21 +441,22 @@ function CollectionList({
     }, [search]);
 
     // Listen for tab and group drops on collections (cross-context drag and drop)
+    // Uses refs to read current drag state to avoid race conditions with React's batched updates
     useEffect(() => {
-        if (!draggingTab && !draggingGroup) {
-            return;
-        }
-
         const handleMouseUp = async (e) => {
+            // Read current drag state from refs to get latest values
+            const currentDraggingGroup = draggingGroupRef.current;
+            const currentDraggingTab = draggingTabRef.current;
+
             // Check if we're dragging a group
-            if (draggingGroup) {
+            if (currentDraggingGroup) {
                 // Find the element under the mouse cursor
                 const elementUnderMouse = document.elementFromPoint(e.clientX, e.clientY);
                 if (!elementUnderMouse) {
                     setDraggingGroup(null);
                     return;
                 }
-                
+
                 // Find the closest collection drop zone
                 const dropZone = elementUnderMouse.closest('[data-collection-drop-zone]');
                 if (!dropZone) {
@@ -364,64 +464,54 @@ function CollectionList({
                     setDraggingGroup(null);
                     return;
                 }
-                
+
                 const targetCollectionUid = dropZone.getAttribute('data-collection-uid');
-                const targetCollection = collections.find(c => c.uid === targetCollectionUid);
-                
+                const { collection: targetCollection, folder: targetFolder } = findCollectionByUid(targetCollectionUid);
+
                 if (!targetCollection) {
                     setDraggingGroup(null);
                     return;
                 }
-                
-                const { group, tabs, sourceCollection } = draggingGroup;
-                
+
+                const { group, tabs, sourceCollection } = currentDraggingGroup;
+
                 // Don't move if dropping on the same collection
                 if (sourceCollection.uid === targetCollection.uid) {
                     setDraggingGroup(null);
                     return;
                 }
-                
+
                 try {
                     // Remove group and its tabs from source collection
                     const updatedSourceCollection = { ...sourceCollection };
                     updatedSourceCollection.tabs = updatedSourceCollection.tabs.filter(t => t.groupUid !== group.uid);
-                    updatedSourceCollection.chromeGroups = updatedSourceCollection.chromeGroups.filter(g => g.uid !== group.uid);
+                    updatedSourceCollection.chromeGroups = (updatedSourceCollection.chromeGroups || []).filter(g => g.uid !== group.uid);
                     updatedSourceCollection.lastUpdated = Date.now();
-                    
+
                     // Add group and its tabs to target collection
                     const updatedTargetCollection = { ...targetCollection };
-                    
+
                     // Add the group to target collection
-                    updatedTargetCollection.chromeGroups = [...updatedTargetCollection.chromeGroups, group];
-                    
+                    updatedTargetCollection.chromeGroups = [...(updatedTargetCollection.chromeGroups || []), group];
+
                     // Add tabs to target collection (preserve groupUid)
                     const tabsWithGroup = tabs.map(tab => ({
                         ...tab,
                         groupUid: group.uid,
                         groupId: group.id || group.uid
                     }));
-                    updatedTargetCollection.tabs = [...updatedTargetCollection.tabs, ...tabsWithGroup];
+                    updatedTargetCollection.tabs = [...(updatedTargetCollection.tabs || []), ...tabsWithGroup];
                     updatedTargetCollection.lastUpdated = Date.now();
-                    
-                    // Update both collections
-                    const updatedCollections = collections.map(c => {
-                        if (c.uid === sourceCollection.uid) {
-                            return updatedSourceCollection;
-                        }
-                        if (c.uid === targetCollection.uid) {
-                            return updatedTargetCollection;
-                        }
-                        return c;
-                    });
-                    
-                    // Update remote data
-                    props.updateRemoteData(updatedCollections);
-                    
-                    // Trigger sync
-                    if (props.triggerSync) {
-                        props.triggerSync();
+
+                    // Use updateCollection prop to properly persist changes
+                    await props.updateCollection(updatedSourceCollection, false);
+                    await props.updateCollection(updatedTargetCollection, true);
+
+                    // Trigger data refresh
+                    if (props.onDataUpdate) {
+                        await props.onDataUpdate();
                     }
-                    
+
                     // Clear drag state
                     setDraggingGroup(null);
                     return;
@@ -431,17 +521,17 @@ function CollectionList({
                     return;
                 }
             }
-            
+
             // Check if we're dragging a tab
-            if (!draggingTab) return;
-            
+            if (!currentDraggingTab) return;
+
             // Find the element under the mouse cursor
             const elementUnderMouse = document.elementFromPoint(e.clientX, e.clientY);
             if (!elementUnderMouse) {
                 setDraggingTab(null);
                 return;
             }
-            
+
             // Find the closest collection drop zone
             const dropZone = elementUnderMouse.closest('[data-collection-drop-zone]');
             if (!dropZone) {
@@ -449,68 +539,61 @@ function CollectionList({
                 setDraggingTab(null);
                 return;
             }
-            
+
             const targetCollectionUid = dropZone.getAttribute('data-collection-uid');
-            const targetCollection = collections.find(c => c.uid === targetCollectionUid);
-            
+            const { collection: targetCollection, folder: targetFolder } = findCollectionByUid(targetCollectionUid);
+
             if (!targetCollection) {
                 setDraggingTab(null);
                 return;
             }
-            
-            const { tab, sourceCollection } = draggingTab;
-            
+
+            const { tab, sourceCollection } = currentDraggingTab;
+
             // Don't move if dropping on the same collection
             if (sourceCollection.uid === targetCollection.uid) {
                 setDraggingTab(null);
                 return;
             }
-            
+
             try {
+                // Find source collection's folder info
+                const { folder: sourceFolder } = findCollectionByUid(sourceCollection.uid);
+
                 // Remove tab from source collection
                 const updatedSourceCollection = { ...sourceCollection };
                 updatedSourceCollection.tabs = updatedSourceCollection.tabs.filter(t => t.uid !== tab.uid);
-                
+
                 // Remove group if it becomes empty
                 if (tab.groupUid) {
                     const tabsInGroup = updatedSourceCollection.tabs.filter(t => t.groupUid === tab.groupUid);
                     if (tabsInGroup.length === 0) {
-                        updatedSourceCollection.chromeGroups = updatedSourceCollection.chromeGroups.filter(
+                        updatedSourceCollection.chromeGroups = (updatedSourceCollection.chromeGroups || []).filter(
                             g => g.uid !== tab.groupUid
                         );
                     }
                 }
                 updatedSourceCollection.lastUpdated = Date.now();
-                
+
                 // Add tab to target collection
                 const updatedTargetCollection = { ...targetCollection };
                 // Remove group info when moving to another collection (tabs lose their group context)
                 const tabWithoutGroup = { ...tab };
                 delete tabWithoutGroup.groupUid;
                 tabWithoutGroup.groupId = -1;
-                
-                updatedTargetCollection.tabs = [...updatedTargetCollection.tabs, tabWithoutGroup];
+
+                updatedTargetCollection.tabs = [...(updatedTargetCollection.tabs || []), tabWithoutGroup];
                 updatedTargetCollection.lastUpdated = Date.now();
-                
-                // Update both collections
-                const updatedCollections = collections.map(c => {
-                    if (c.uid === sourceCollection.uid) {
-                        return updatedSourceCollection;
-                    }
-                    if (c.uid === targetCollection.uid) {
-                        return updatedTargetCollection;
-                    }
-                    return c;
-                });
-                
-                // Update remote data
-                props.updateRemoteData(updatedCollections);
-                
-                // Trigger sync
-                if (props.triggerSync) {
-                    props.triggerSync();
+
+                // Use updateCollection prop to properly persist changes
+                await props.updateCollection(updatedSourceCollection, false);
+                await props.updateCollection(updatedTargetCollection, true);
+
+                // Trigger data refresh
+                if (props.onDataUpdate) {
+                    await props.onDataUpdate();
                 }
-                
+
                 // Clear drag state
                 setDraggingTab(null);
             } catch (error) {
@@ -523,7 +606,7 @@ function CollectionList({
         return () => {
             document.removeEventListener('mouseup', handleMouseUp);
         };
-    }, [draggingTab, draggingGroup, collections, props, setDraggingTab, setDraggingGroup]);
+    }, [props, setDraggingTab, setDraggingGroup, findCollectionByUid]);
 
     const handleDragStart = (event) => {
         
@@ -562,7 +645,6 @@ function CollectionList({
 
     const handleDragEnd = async (event) => {
         const { active, over } = event;
-
         // Preserve scroll position before any data updates
         const scrollContainer = document.querySelector('.settings_body');
         const currentScrollTop = scrollContainer ? scrollContainer.scrollTop : 0;
@@ -578,16 +660,24 @@ function CollectionList({
         if (!over || active.id === over.id) {
             setActiveCollection(null);
             setActiveFolder(null);
-            setDraggingTab(null); // Clear tab drag state
-            setDraggingGroup(null); // Clear group drag state
+            // Don't clear draggingTab/draggingGroup here — when a tab/group drag
+            // is active in the inner DndContext, this outer DndContext also fires
+            // handleDragEnd (pointer events bubble). The mouseup handler handles
+            // cross-collection drop cleanup; clearing here would race with it.
             return;
         }
 
         // Handle tab drop on collection (cross-collection drag and drop)
         if (draggingTab && over.data.current?.type === 'collection-drop') {
-            const targetCollection = over.data.current.collection;
+            const targetCollectionUid = over.data.current.collection?.uid;
+            const { collection: targetCollection } = findCollectionByUid(targetCollectionUid);
             const sourceCollection = draggingTab.sourceCollection;
             const tabToMove = draggingTab.tab;
+            
+            if (!targetCollection) {
+                setDraggingTab(null);
+                return;
+            }
             
             // Don't move if dropping on the same collection
             if (sourceCollection.uid === targetCollection.uid) {
@@ -604,7 +694,7 @@ function CollectionList({
                 if (tabToMove.groupUid) {
                     const tabsInGroup = updatedSourceCollection.tabs.filter(t => t.groupUid === tabToMove.groupUid);
                     if (tabsInGroup.length === 0) {
-                        updatedSourceCollection.chromeGroups = updatedSourceCollection.chromeGroups.filter(
+                        updatedSourceCollection.chromeGroups = (updatedSourceCollection.chromeGroups || []).filter(
                             g => g.uid !== tabToMove.groupUid
                         );
                     }
@@ -618,31 +708,16 @@ function CollectionList({
                 delete tabWithoutGroup.groupUid;
                 tabWithoutGroup.groupId = -1;
                 
-                updatedTargetCollection.tabs = [...updatedTargetCollection.tabs, tabWithoutGroup];
+                updatedTargetCollection.tabs = [...(updatedTargetCollection.tabs || []), tabWithoutGroup];
                 updatedTargetCollection.lastUpdated = Date.now();
                 
-                // Update both collections
-                const updatedCollections = collections.map(c => {
-                    if (c.uid === sourceCollection.uid) {
-                        return updatedSourceCollection;
-                    }
-                    if (c.uid === targetCollection.uid) {
-                        return updatedTargetCollection;
-                    }
-                    return c;
-                });
+                // Use updateCollection prop to properly persist changes
+                await props.updateCollection(updatedSourceCollection, false);
+                await props.updateCollection(updatedTargetCollection, true);
                 
-                // Update remote data
-                props.updateRemoteData(updatedCollections);
-                
-                // Trigger sync
-                if (props.triggerSync) {
-                    props.triggerSync();
-                }
-                
-                // Trigger lightning effect on target collection
-                if (props.lightningEffectUid !== undefined) {
-                    // This would need to be handled by parent component
+                // Trigger data refresh
+                if (props.onDataUpdate) {
+                    await props.onDataUpdate();
                 }
                 
                 setDraggingTab(null);
@@ -654,13 +729,8 @@ function CollectionList({
             }
         }
         
-        // Clear tab/group drag state if not a tab/group drop
-        if (draggingTab) {
-            setDraggingTab(null);
-        }
-        if (draggingGroup) {
-            setDraggingGroup(null);
-        }
+        // Don't clear draggingTab/draggingGroup here — the mouseup handler owns
+        // cross-collection drag cleanup for tab/group drags from the inner DndContext.
 
         let draggedItem = allItems.find(item => item.uid === active.id);
         let targetItem = allItems.find(item => item.uid === over.id);
@@ -926,9 +996,9 @@ function CollectionList({
 
         setActiveCollection(null);
         setActiveFolder(null);
-        setDraggingTab(null); // Ensure tab drag state is cleared
-        setDraggingGroup(null); // Ensure group drag state is cleared
-        
+        // Don't clear draggingTab/draggingGroup — the mouseup handler owns
+        // cross-collection drag cleanup. Clearing here races with it.
+
         // Final scroll position restoration as a safety net
         // This covers any edge cases where scroll might jump
         setTimeout(() => {
@@ -993,13 +1063,13 @@ function CollectionList({
                                                     lightningEffect={lightningEffectUid === collection.uid}
                                                     isInFolder={false}
                                                     search={search}
+                                                    onSelect={handleSelectCollection}
                                                 />
                                             ) : (
                                                 <MemoizedSortableCollectionItem
                                                     key={collection.uid}
                                                     id={collection.uid}
                                                     updateRemoteData={props.updateRemoteData}
-                                                    expanded={false}
                                                     disableDrag={disableDrag}
                                                     index={index}
                                                     activeId={activeCollection?.uid}
@@ -1011,6 +1081,7 @@ function CollectionList({
                                                     lightningEffect={lightningEffectUid === collection.uid}
                                                     isInFolder={false}
                                                     search={search}
+                                                    onSelect={handleSelectCollection}
                                                 />
                                             )
                                         )}
@@ -1065,13 +1136,13 @@ function CollectionList({
                                                                         lightningEffect={lightningEffectUid === collection.uid}
                                                                         isInFolder={true}
                                                                         search={search}
+                                                                        onSelect={handleSelectCollection}
                                                                     />
                                                                 ) : (
                                                                     <MemoizedSortableCollectionItem
                                                                         key={collection.uid}
                                                                         id={collection.uid}
                                                                         updateRemoteData={props.updateRemoteData}
-                                                                        expanded={false}
                                                                         disableDrag={disableDrag}
                                                                         index={-1}
                                                                         activeId={activeCollection?.uid}
@@ -1083,6 +1154,7 @@ function CollectionList({
                                                                         lightningEffect={lightningEffectUid === collection.uid}
                                                                         isInFolder={true}
                                                                         search={search}
+                                                                        onSelect={handleSelectCollection}
                                                                     />
                                                                 )
                                                             )}
@@ -1119,13 +1191,13 @@ function CollectionList({
                                                             lightningEffect={lightningEffectUid === collection.uid}
                                                             isInFolder={false}
                                                             search={search}
+                                                            onSelect={handleSelectCollection}
                                                         />
                                                     ) : (
                                                         <MemoizedSortableCollectionItem
                                                             key={collection.uid}
                                                             id={collection.uid}
                                                             updateRemoteData={props.updateRemoteData}
-                                                            expanded={false}
                                                             disableDrag={disableDrag}
                                                             index={index}
                                                             activeId={activeCollection?.uid}
@@ -1137,6 +1209,7 @@ function CollectionList({
                                                             lightningEffect={lightningEffectUid === collection.uid}
                                                             isInFolder={false}
                                                             search={search}
+                                                            onSelect={handleSelectCollection}
                                                         />
                                                     )
                                                 )}
@@ -1189,6 +1262,20 @@ function CollectionList({
                 <div className={props.viewMode === 'grid' ? 'collection-grid' : 'collection-list'}>
                     <NoCollections />
                 </div>
+            )}
+            
+            {/* Collection Detail Panel */}
+            {selectedCollection && (
+                <CollectionDetailPanel
+                    collection={selectedCollection}
+                    isOpen={isPanelOpen}
+                    onClose={handleClosePanel}
+                    updateCollection={props.updateCollection}
+                    removeCollection={props.removeCollection}
+                    updateRemoteData={props.updateRemoteData}
+                    addCollection={addCollection}
+                    onDataUpdate={props.onDataUpdate}
+                />
             )}
         </section>);
 }

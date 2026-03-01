@@ -9,6 +9,7 @@ build
 !.yarn/versions
 .pnp.*
 chrome/api-keys.json
+chrome/api-keys.local.json
 .vscode
 .DS_Store
 *.zip

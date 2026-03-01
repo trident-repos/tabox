@@ -26,9 +26,11 @@ function SortableFolderContainer(props) {
         transform: CSS.Transform.toString(transform),
         transition,
         opacity: isDragging ? 0.6 : 1,
-        borderTop: isDragging ? '1px solid var(--primary-color)' : '1px solid transparent',
-        borderBottom: isDragging ? '1px solid var(--primary-color)' : '1px solid transparent',
+        borderTop: isDragging ? '1px solid var(--primary-color)' : 'none',
+        borderBottom: isDragging ? '1px solid var(--primary-color)' : 'none',
         zIndex: isDragging ? 1000 : 1,
+        margin: 0,
+        padding: 0,
     };
 
     return (
