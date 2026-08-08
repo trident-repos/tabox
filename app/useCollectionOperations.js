@@ -14,8 +14,6 @@ import { getDisplayInfo } from './utils/displayInfo';
 
 export const openCollectionTabs = async ({
     collectionToOpen,
-    updateCollection,
-    openedCollectionToTrack = collectionToOpen,
     trackOpenedWindow = true
 }) => {
     const { chkOpenNewWindow } = await browser.storage.local.get('chkOpenNewWindow');
@@ -146,8 +144,6 @@ export const openCollectionTabs = async ({
     // window itself and would have silently dropped `lastOpened` too. The
     // popup UI picks the change up via its `browser.storage.onChanged`
     // listener (see app/App.js), same as any other background-driven write.
-    // `openedCollectionToTrack`/`updateCollection` are kept as parameters for
-    // call-site compatibility but are no longer used here.
 
     return result;
 };
@@ -364,9 +360,7 @@ export function useCollectionOperations({
         }
 
         await openCollectionTabs({
-            collectionToOpen: collection,
-            updateCollection,
-            openedCollectionToTrack: collection
+            collectionToOpen: collection
         });
     };
 

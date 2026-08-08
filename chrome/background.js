@@ -2548,15 +2548,20 @@ try {
       }
       
       if (chkOpenNewWindow) {
-        window = await browser.windows.create({ 
+        // Reuse createOpenTabsWindow (the same helper the popup's createWindowSpec
+        // path uses) instead of a bare `windows.create()`, so this path gets the
+        // same incognito-creation-failure fallback and window.tabs population -
+        // this inline call never had that fallback, unlike every other
+        // "open in new window" entry point.
+        window = await createOpenTabsWindow({
           focused: true,
-          incognito: createIncognito 
+          incognito: createIncognito
         });
       } else {
         window = await browser.windows.getCurrent({ populate: true, windowTypes: ['normal'] });
+        window.tabs = await browser.tabs.query({ windowId: window.id });
       }
-      
-      window.tabs = await browser.tabs.query({ windowId: window.id });
+
       const result = await openTabs(collection, window, chkOpenNewWindow);
       
       // Log result for debugging

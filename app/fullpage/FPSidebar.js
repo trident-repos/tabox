@@ -394,23 +394,25 @@ function FPSidebar({
                     // messages), but this loop's own bookkeeping
                     // (openedCollections/failedCollections below) may not run to
                     // completion. Acceptable for now - Chrome is unaffected.
+                    // `newWindow` is intentionally omitted: openTabs() in the background
+                    // only bypasses its chkIgnoreDuplicates storage lookup when
+                    // `newWindow` is truthy, so sending `true` here would silently
+                    // disable the user's "ignore duplicates" setting for this path.
                     await browser.runtime.sendMessage({
                         type: 'openTabs',
                         collection,
                         createWindowSpec: windowCreationObject,
-                        newWindow: true,
                     });
-                    openedCollections.push({ ...collection, lastOpened: Date.now() });
+                    // Don't stamp/persist lastOpened here - the background's
+                    // markCollectionOpenedBG already stamps it authoritatively.
+                    // A popup-side write here would double-stamp on Chrome and,
+                    // being a full-object overwrite, could clobber a concurrent
+                    // background auto-update save. The UI picks up the change via
+                    // storage.onChanged, same as the single-open path.
+                    openedCollections.push(collection);
                 } catch {
                     failedCollections.push(collection.name);
                 }
-            }
-
-            if (openedCollections.length > 0) {
-                try {
-                    const { batchUpdateCollections } = await import('../utils/storageUtils');
-                    await batchUpdateCollections(openedCollections);
-                } catch { /* silent */ }
             }
 
             if (failedCollections.length > 0) {

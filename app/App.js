@@ -2130,8 +2130,7 @@ function App({ mode = 'popup' }) {
     switch (actionId) {
       case 'open': {
         await openCollectionTabs({
-          collectionToOpen: collection,
-          updateCollection
+          collectionToOpen: collection
         });
         break;
       }

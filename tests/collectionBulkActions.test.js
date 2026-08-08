@@ -16,12 +16,7 @@ jest.mock('../static/globals', () => ({
     },
 }));
 
-jest.mock('../app/utils/storageUtils', () => ({
-    batchUpdateCollections: jest.fn(async () => true),
-}));
-
 import { browser } from '../static/globals';
-import { batchUpdateCollections } from '../app/utils/storageUtils';
 import {
     buildCollectionSubsetExport,
     openCollectionsInSequence,
@@ -64,7 +59,7 @@ describe('openCollectionsInSequence', () => {
         jest.clearAllMocks();
     });
 
-    test('sends createWindowSpec (not a pre-created window) and persists lastOpened for successes', async () => {
+    test('sends createWindowSpec (not a pre-created window) without newWindow, and tracks successes without stamping lastOpened locally', async () => {
         const collections = [
             {
                 uid: 'collection-a',
@@ -88,15 +83,25 @@ describe('openCollectionsInSequence', () => {
         // against.
         expect(browser.windows.create).not.toHaveBeenCalled();
         expect(browser.runtime.sendMessage).toHaveBeenCalledTimes(2);
+        // `newWindow` must be omitted (not sent as `true`): openTabs() in the
+        // background only bypasses its chkIgnoreDuplicates storage lookup when
+        // `newWindow` is truthy, so sending `true` here would silently disable
+        // the user's "ignore duplicates" setting for this path.
         expect(browser.runtime.sendMessage).toHaveBeenNthCalledWith(1, expect.objectContaining({
             type: 'openTabs',
-            newWindow: true,
             createWindowSpec: expect.objectContaining({ focused: true }),
         }));
-        expect(batchUpdateCollections).toHaveBeenCalledWith([
-            expect.objectContaining({ uid: 'collection-a', lastOpened: expect.any(Number) }),
-            expect.objectContaining({ uid: 'collection-b', lastOpened: expect.any(Number) }),
+        const [firstCallArgs] = browser.runtime.sendMessage.mock.calls[0];
+        expect(firstCallArgs).not.toHaveProperty('newWindow');
+        // lastOpened is stamped authoritatively by the background
+        // (markCollectionOpenedBG), never re-written here - a popup-side write
+        // would double-stamp on Chrome and could clobber a concurrent
+        // background auto-update save.
+        expect(result.openedCollections).toEqual([
+            expect.objectContaining({ uid: 'collection-a' }),
+            expect.objectContaining({ uid: 'collection-b' }),
         ]);
+        expect(result.openedCollections.some((c) => 'lastOpened' in c)).toBe(false);
         expect(result).toEqual(expect.objectContaining({
             openedCount: 2,
             failedCount: 0,
@@ -115,8 +120,8 @@ describe('openCollectionsInSequence', () => {
 
         expect(result.failedCollections).toEqual(['Collection A']);
         expect(result.openedCount).toBe(1);
-        expect(batchUpdateCollections).toHaveBeenCalledWith([
-            expect.objectContaining({ uid: 'collection-b', lastOpened: expect.any(Number) }),
+        expect(result.openedCollections).toEqual([
+            expect.objectContaining({ uid: 'collection-b' }),
         ]);
     });
 });

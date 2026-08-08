@@ -190,8 +190,6 @@ function ExpandedCollectionData(props) {
                 tabs: groupTabs,
                 chromeGroups: [group],
             },
-            updateCollection: props.updateCollection,
-            openedCollectionToTrack: props.collection,
             trackOpenedWindow: false,
         });
     };
