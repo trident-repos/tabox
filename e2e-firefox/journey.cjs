@@ -250,7 +250,11 @@ async function main() {
               collection: out.savedCollection,
               window: targetWin,
               newWindow: true,
-              trackOpenedWindow: false,
+              // true (not the earlier false) so this also proves the
+              // windows.onRemoved Firefox-fallback fix below: tracking only
+              // happens when this is true, and untracking only happens if
+              // that listener actually fired when the window closes.
+              trackOpenedWindow: true,
             });
             out.openResult = openResult;
 
@@ -270,6 +274,43 @@ async function main() {
             }
             out.tabsInTarget = tabsInTarget.map((t) => ({ url: t.url, groupId: t.groupId }));
             out.groupsInTarget = groupsInTarget;
+
+            // --- 4. windows.onRemoved listener proof ---
+            // This is the real-Firefox proof that chrome/background.js's
+            // top-level `browser.windows.onRemoved.addListener(fn, {
+            // windowTypes: ['normal'] })` registration (and its Firefox
+            // fallback when that filter throws) actually attaches a working
+            // listener, not just that background.js loads without throwing.
+            // trackOpenedWindow: true above means openTabs registered
+            // targetWin.id in `collectionsToTrack`; closing that window can
+            // only prune it back out if handleWindowRemoved really ran,
+            // which can only happen if the listener registration (whichever
+            // of the filtered/unfiltered addListener calls succeeded)
+            // actually took effect. Before the plain-Error fix, Firefox threw
+            // past both the filtered call AND aborted every registration
+            // after it in the same top-level script, so this listener would
+            // never have attached at all and this assertion would fail.
+            if (openResult && openResult.success) {
+              const trackedBefore = await browser.storage.local.get('collectionsToTrack');
+              out.trackedBeforeClose = (trackedBefore.collectionsToTrack || []).find(
+                (c) => c.windowId === targetWin.id
+              );
+
+              await browser.windows.remove(targetWin.id);
+              // Already removed above - don't let the finally block try again.
+              const idx = cleanupWindowIds.indexOf(targetWin.id);
+              if (idx > -1) cleanupWindowIds.splice(idx, 1);
+
+              let trackedAfter = out.trackedBeforeClose || null;
+              for (let i = 0; i < 25 && trackedAfter; i++) {
+                await new Promise((r) => setTimeout(r, 200));
+                const dump = await browser.storage.local.get('collectionsToTrack');
+                trackedAfter = (dump.collectionsToTrack || []).find(
+                  (c) => c.windowId === targetWin.id
+                );
+              }
+              out.trackedAfterClose = trackedAfter;
+            }
           }
 
           done({ ok: true, out });
@@ -371,6 +412,21 @@ async function main() {
         'restored window has a tab group titled "smoke-group" with color grey (tabGroups.query)',
         restoredGroup && restoredGroup.title === 'smoke-group' && restoredGroup.color === 'grey',
         JSON.stringify(restoredGroup)
+      );
+
+      // Real-Firefox proof that windows.onRemoved listener registration
+      // works: see the "windows.onRemoved listener proof" comment in the
+      // executeAsyncScript above for the full mechanism.
+      assert(
+        'restored window was tracked in collectionsToTrack (trackOpenedWindow: true) before it was closed',
+        !!out.trackedBeforeClose,
+        JSON.stringify(out.trackedBeforeClose)
+      );
+      assert(
+        'windows.onRemoved fired on real Firefox and pruned collectionsToTrack after closing the tracked window ' +
+          '(proves the { windowTypes } filter fallback actually registers a working listener, not just that background.js loads without throwing)',
+        !!out.trackedBeforeClose && !out.trackedAfterClose,
+        JSON.stringify({ trackedBeforeClose: out.trackedBeforeClose, trackedAfterClose: out.trackedAfterClose })
       );
     }
   } finally {

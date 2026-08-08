@@ -2792,17 +2792,23 @@ try {
   };
   try {
     browser.windows.onRemoved.addListener(handleWindowRemoved, { windowTypes: ['normal'] });
-  } catch (error) {
-    if (!(error instanceof TypeError)) throw error;
-    // Firefox throws "Incorrect argument types for windows.onRemoved" for the
-    // { windowTypes } event filter, synchronously, at background-script load
-    // time. Since this call sits at the top level, that throw aborts every
-    // listener registration after it (windows.onCreated/onFocusChanged/
-    // onBoundsChanged, all tabs.* events, etc.) — auto-update, badge, and
-    // window tracking all silently stop working on Firefox. Fall back to
-    // registering the same callback without the filter: it's safe because the
-    // callback body only prunes collectionsToTrack entries by windowId, which
-    // is a correct (and harmless) no-op for non-"normal" window types too.
+  } catch {
+    // Firefox's WebExtensions argument validator rejects the { windowTypes }
+    // event filter on windows.onRemoved, synchronously, at background-script
+    // load time — but it throws a plain `Error` ("Incorrect argument types
+    // for windows.onRemoved."), NOT a TypeError, so this must catch any throw
+    // here rather than filtering by error type (that distinction isn't part
+    // of any spec and isn't future-proof). Since this call sits at the top
+    // level, an uncaught throw would abort every listener registration after
+    // it (windows.onCreated/onFocusChanged/onBoundsChanged, all tabs.*
+    // events, etc.) — auto-update, badge, and window tracking would all
+    // silently stop working on Firefox. Fall back to registering the same
+    // callback without the filter: it's safe because the callback body only
+    // prunes collectionsToTrack entries by windowId, which is a correct (and
+    // harmless) no-op for non-"normal" window types too. If the unfiltered
+    // registration itself throws, there's no further fallback to try — it
+    // propagates out of this try/catch (and from there into the pre-existing
+    // outer try/catch that already wraps this whole startup block).
     browser.windows.onRemoved.addListener(handleWindowRemoved);
   }
 
