@@ -47,4 +47,10 @@ NODE_PATH="$DEPS_DIR/node_modules" \
 MOZ_REMOTE_ALLOW_SYSTEM_ACCESS=1 \
   node "$SCRIPT_DIR/journey.cjs" || STATUS=1
 
+echo
+echo "Running Firefox full regression suite..."
+NODE_PATH="$DEPS_DIR/node_modules" \
+MOZ_REMOTE_ALLOW_SYSTEM_ACCESS=1 \
+  node "$SCRIPT_DIR/regression.cjs" || STATUS=1
+
 exit "$STATUS"
