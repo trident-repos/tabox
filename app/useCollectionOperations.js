@@ -34,7 +34,16 @@ export const openCollectionTabs = async ({
         }
     }
 
-    let window;
+    // New-window path: build the window-creation spec here (bounds clamping needs
+    // getDisplayInfo, which falls back to the popup's window.screen on Firefox) but
+    // send it to the background WITHOUT creating the window first. On Firefox,
+    // focusing a brand-new window destroys the popup document immediately, so any
+    // popup-side code after `windows.create()` - including the `sendMessage` call
+    // itself - never ran, leaving a blank window. The background now creates the
+    // window (including the incognito fallback, replicated in
+    // chrome/background.js's `createOpenTabsWindow`) and opens the tabs atomically
+    // in response to a single message sent before any window exists.
+    let msg;
     if (chkOpenNewWindow) {
         let windowCreationObject = { focused: true };
 
@@ -89,30 +98,24 @@ export const openCollectionTabs = async ({
             }
         }
 
-        try {
-            window = await browser.windows.create(windowCreationObject);
-        } catch (windowError) {
-            // If incognito window creation fails, fall back to normal window
-            if (windowCreationObject.incognito) {
-                console.warn('Failed to create incognito window, falling back to normal:', windowError);
-                delete windowCreationObject.incognito;
-                window = await browser.windows.create(windowCreationObject);
-            } else {
-                throw windowError;
-            }
-        }
-        window.tabs = await browser.tabs.query({ windowId: window.id });
+        msg = {
+            type: 'openTabs',
+            collection: collectionToOpen,
+            createWindowSpec: windowCreationObject,
+            newWindow: true,
+            trackOpenedWindow
+        };
     } else {
-        window = await browser.windows.getCurrent({ populate: true, windowTypes: ['normal'] });
+        const window = await browser.windows.getCurrent({ populate: true, windowTypes: ['normal'] });
+        msg = {
+            type: 'openTabs',
+            collection: collectionToOpen,
+            window,
+            newWindow: false,
+            trackOpenedWindow
+        };
     }
 
-    const msg = {
-        type: 'openTabs',
-        collection: collectionToOpen,
-        window,
-        newWindow: chkOpenNewWindow,
-        trackOpenedWindow
-    };
     const result = await browser.runtime.sendMessage(msg);
 
     // Show feedback for incognito-related scenarios
@@ -132,15 +135,19 @@ export const openCollectionTabs = async ({
         }
     }
 
-    if (openedCollectionToTrack && updateCollection) {
-        // Opening a collection is never blocked by folder permissions (read-only
-        // members can always open); this only bumps a local, unsynced timestamp.
-        await updateCollection({
-            ...openedCollectionToTrack,
-            lastOpened: Date.now(),
-            __skipFolderGuard: true
-        });
-    }
+    // `lastOpened` is intentionally NOT stamped here anymore. The background
+    // `openTabs` handler (chrome/background.js) already persists it
+    // authoritatively for every path - including this one - via
+    // `markCollectionOpenedBG`, which runs (and resolves, since `result` above
+    // awaited it) before this line. Stamping it again here was always
+    // redundant on Chrome and, on Firefox, this code never even ran for the
+    // new-window path (the popup document is destroyed the instant the new
+    // window takes focus) - which was the root cause of this bug for the
+    // window itself and would have silently dropped `lastOpened` too. The
+    // popup UI picks the change up via its `browser.storage.onChanged`
+    // listener (see app/App.js), same as any other background-driven write.
+    // `openedCollectionToTrack`/`updateCollection` are kept as parameters for
+    // call-site compatibility but are no longer used here.
 
     return result;
 };

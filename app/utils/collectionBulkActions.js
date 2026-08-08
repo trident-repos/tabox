@@ -54,11 +54,23 @@ export const openCollectionsInSequence = async (collections = []) => {
 
     for (const collection of collections) {
         try {
-            const win = await browser.windows.create(buildWindowCreationObject(collection, displays));
+            // Send createWindowSpec (not a pre-created window) so the background
+            // creates the window and opens the tabs atomically - on Firefox,
+            // focusing a brand-new window destroys the calling document (popup or
+            // full page) immediately, so any code after `windows.create()`
+            // (including the old `sendMessage` call) would never run, leaving a
+            // blank window. NOTE: for this multi-collection loop, the caller may
+            // still die on Firefox right after the FIRST window opens. The
+            // remaining collections still open correctly (the work is driven by
+            // background messages), but this loop's own bookkeeping
+            // (openedCollections/failedCollections, the batchUpdateCollections
+            // call below) may not run to completion. Acceptable for now - Chrome
+            // is unaffected.
             await browser.runtime.sendMessage({
                 type: 'openTabs',
                 collection,
-                window: win,
+                createWindowSpec: buildWindowCreationObject(collection, displays),
+                newWindow: true,
             });
             openedCollections.push({
                 ...collection,

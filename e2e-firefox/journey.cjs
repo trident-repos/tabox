@@ -311,6 +311,67 @@ async function main() {
               }
               out.trackedAfterClose = trackedAfter;
             }
+
+            // --- 5. Regression fence for the "blank window" bug: restore via
+            // `createWindowSpec` - the NEW popup-shaped message - instead of a
+            // pre-created `window`. This is exactly the message shape the popup
+            // now sends for the new-window path (see
+            // app/useCollectionOperations.js): a single `openTabs` message sent
+            // BEFORE any window exists, letting the background create the
+            // window and open the tabs atomically. Sending it directly from
+            // this extension-privileged popup page proves the background
+            // really does create the window itself; before the fix, the popup
+            // created the window (and could be torn down by the resulting
+            // focus change before ever sending this message), so this message
+            // shape didn't exist at all.
+            const windowsBeforeSpec = await browser.windows.getAll();
+            const idsBeforeSpec = new Set(windowsBeforeSpec.map((w) => w.id));
+
+            const createWindowSpecResult = await browser.runtime.sendMessage({
+              type: 'openTabs',
+              collection: out.savedCollection,
+              createWindowSpec: { focused: true },
+              newWindow: true,
+              trackOpenedWindow: false,
+            });
+            out.createWindowSpecResult = createWindowSpecResult;
+
+            let specWin = null;
+            for (let i = 0; i < 20 && !specWin; i++) {
+              await new Promise((r) => setTimeout(r, 200));
+              const windowsAfterSpec = await browser.windows.getAll();
+              specWin = windowsAfterSpec.find((w) => !idsBeforeSpec.has(w.id));
+            }
+
+            if (specWin) {
+              cleanupWindowIds.push(specWin.id);
+
+              let tabsInSpecWindow = [];
+              let groupsInSpecWindow = [];
+              for (let i = 0; i < 20; i++) {
+                await new Promise((r) => setTimeout(r, 300));
+                tabsInSpecWindow = await browser.tabs.query({ windowId: specWin.id });
+                groupsInSpecWindow = await browser.tabGroups.query({ windowId: specWin.id });
+                if (
+                  groupsInSpecWindow.length > 0 &&
+                  tabsInSpecWindow.filter((t) => t.url.includes(MARKER)).length >=
+                    out.savedCollection.tabs.length
+                ) {
+                  break;
+                }
+              }
+              out.createWindowSpecTabs = tabsInSpecWindow.map((t) => ({
+                url: t.url,
+                groupId: t.groupId,
+              }));
+              out.createWindowSpecGroups = groupsInSpecWindow;
+
+              await browser.windows.remove(specWin.id);
+              const specIdx = cleanupWindowIds.indexOf(specWin.id);
+              if (specIdx > -1) cleanupWindowIds.splice(specIdx, 1);
+            } else {
+              out.createWindowSpecWindowMissing = true;
+            }
           }
 
           done({ ok: true, out });
@@ -427,6 +488,48 @@ async function main() {
           '(proves the { windowTypes } filter fallback actually registers a working listener, not just that background.js loads without throwing)',
         !!out.trackedBeforeClose && !out.trackedAfterClose,
         JSON.stringify({ trackedBeforeClose: out.trackedBeforeClose, trackedAfterClose: out.trackedAfterClose })
+      );
+
+      // --- Regression fence: the NEW popup-shaped `createWindowSpec` message ---
+      // This is the exact fix for the "blank window" bug: opening a collection
+      // into a new window used to have the popup call `browser.windows.create()`
+      // itself and only afterwards send `openTabs` - on real Firefox, the new
+      // window taking focus destroys the popup document before that
+      // `sendMessage` call can run, leaving a blank window with no tabs. The
+      // popup now sends `createWindowSpec` instead of a pre-created `window`,
+      // and the background creates the window and opens the tabs atomically in
+      // response to a single message. These assertions prove that message
+      // shape actually works end to end on real Firefox.
+      assert(
+        'createWindowSpec message opened a real window (the background created it, not the caller)',
+        !out.createWindowSpecWindowMissing,
+        JSON.stringify(out.createWindowSpecResult)
+      );
+
+      assert(
+        'createWindowSpec message reports success restoring all 3 tabs',
+        out.createWindowSpecResult &&
+          out.createWindowSpecResult.success === true &&
+          out.createWindowSpecResult.tabsOpened === 3,
+        JSON.stringify(out.createWindowSpecResult)
+      );
+
+      const createWindowSpecMarkerTabs = (out.createWindowSpecTabs || []).filter((t) =>
+        t.url.includes(out.marker)
+      );
+      assert(
+        'all 3 saved tabs are present in the createWindowSpec-opened window',
+        createWindowSpecMarkerTabs.length === 3,
+        JSON.stringify(out.createWindowSpecTabs)
+      );
+
+      const createWindowSpecGroup = (out.createWindowSpecGroups || [])[0];
+      assert(
+        'createWindowSpec-opened window has a tab group titled "smoke-group" with color grey (tabGroups.query)',
+        createWindowSpecGroup &&
+          createWindowSpecGroup.title === 'smoke-group' &&
+          createWindowSpecGroup.color === 'grey',
+        JSON.stringify(createWindowSpecGroup)
       );
     }
   } finally {

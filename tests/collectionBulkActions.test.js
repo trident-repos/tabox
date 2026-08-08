@@ -64,7 +64,7 @@ describe('openCollectionsInSequence', () => {
         jest.clearAllMocks();
     });
 
-    test('opens each collection sequentially and persists lastOpened for successes', async () => {
+    test('sends createWindowSpec (not a pre-created window) and persists lastOpened for successes', async () => {
         const collections = [
             {
                 uid: 'collection-a',
@@ -81,8 +81,18 @@ describe('openCollectionsInSequence', () => {
 
         const result = await openCollectionsInSequence(collections);
 
-        expect(browser.windows.create).toHaveBeenCalledTimes(2);
+        // Window creation must happen in the background (driven by
+        // createWindowSpec), never here - on Firefox, focusing a brand-new
+        // window destroys the calling document before any code after
+        // `windows.create()` can run, which is exactly the bug this guards
+        // against.
+        expect(browser.windows.create).not.toHaveBeenCalled();
         expect(browser.runtime.sendMessage).toHaveBeenCalledTimes(2);
+        expect(browser.runtime.sendMessage).toHaveBeenNthCalledWith(1, expect.objectContaining({
+            type: 'openTabs',
+            newWindow: true,
+            createWindowSpec: expect.objectContaining({ focused: true }),
+        }));
         expect(batchUpdateCollections).toHaveBeenCalledWith([
             expect.objectContaining({ uid: 'collection-a', lastOpened: expect.any(Number) }),
             expect.objectContaining({ uid: 'collection-b', lastOpened: expect.any(Number) }),
@@ -94,9 +104,9 @@ describe('openCollectionsInSequence', () => {
     });
 
     test('records failures without aborting later collections', async () => {
-        browser.windows.create
+        browser.runtime.sendMessage
             .mockRejectedValueOnce(new Error('boom'))
-            .mockResolvedValueOnce({ id: 102 });
+            .mockResolvedValueOnce({ success: true });
 
         const result = await openCollectionsInSequence([
             { uid: 'collection-a', name: 'Collection A', tabs: [] },

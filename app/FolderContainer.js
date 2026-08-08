@@ -641,14 +641,27 @@ function FolderContainer({
                         }
                     }
                     
-                    const window = await browser.windows.create(windowCreationObject);
+                    // Send createWindowSpec (not a pre-created window) so the background
+                    // creates the window and opens the tabs atomically - on Firefox,
+                    // focusing a brand-new window destroys this popup document
+                    // immediately, so any code after `windows.create()` (including the
+                    // old `sendMessage` call) would never run, leaving a blank window.
+                    // NOTE: for multi-collection loops like this one, the popup may still
+                    // die on Firefox right after the FIRST window opens (a later window
+                    // stealing focus). The remaining collections still open correctly
+                    // (the work is driven by background messages), but this loop's own
+                    // bookkeeping (openedCollections/failedCollections, the
+                    // batchUpdateCollections call below) may not run to completion. This
+                    // is acceptable for now - Chrome, where the popup survives, is
+                    // unaffected.
                     const msg = {
                         type: 'openTabs',
                         collection: collection,
-                        window: window
+                        createWindowSpec: windowCreationObject,
+                        newWindow: true
                     };
                     await browser.runtime.sendMessage(msg);
-                    
+
                     openedCollections.push({ ...collection, lastOpened: Date.now() });
                 } catch (error) {
                     console.error(`❌ Failed to open collection ${collection.name}:`, error);

@@ -993,6 +993,38 @@ async function isIncognitoEnabled() {
   }
 }
 
+// Creates the destination window for the new-window "open collection" path.
+// Moved here (from the popup) so the whole "create window -> open tabs" sequence
+// runs in the background: on Firefox, focusing a brand-new window destroys the
+// popup document immediately, so any popup-side code after `windows.create()`
+// (including the old `runtime.sendMessage` call) never ran. The popup now only
+// builds `createWindowSpec` (bounds clamping still needs the popup's
+// window.screen-backed getDisplayInfo) and sends ONE message before any window
+// exists; this function - and the incognito fallback it replicates from the old
+// popup-side useCollectionOperations.js logic - does the rest atomically.
+async function createOpenTabsWindow(createWindowSpec) {
+  const windowCreationObject = { ...createWindowSpec };
+  let window;
+  try {
+    window = await browser.windows.create(windowCreationObject);
+  } catch (windowError) {
+    // If incognito window creation fails, fall back to a normal window. Build a
+    // fresh object for the retry rather than mutating `windowCreationObject`
+    // in place, so each `windows.create()` call is recorded with its own,
+    // independent arguments.
+    if (windowCreationObject.incognito) {
+      console.warn('Failed to create incognito window, falling back to normal:', windowError);
+      const fallbackWindowCreationObject = { ...windowCreationObject };
+      delete fallbackWindowCreationObject.incognito;
+      window = await browser.windows.create(fallbackWindowCreationObject);
+    } else {
+      throw windowError;
+    }
+  }
+  window.tabs = await browser.tabs.query({ windowId: window.id });
+  return window;
+}
+
 // Optimized openTabs function for better performance with large collections
 // Now with incognito-aware restoration
 async function openTabs(collection, window, newWindow = null, trackOpenedWindow = true) {
@@ -2082,9 +2114,15 @@ try {
       }
     }
     if (request.type === 'openTabs') {
+      // New-window path: the popup sends `createWindowSpec` instead of a
+      // pre-created `window` so the create+open sequence happens atomically
+      // here, in the background, before the popup can be torn down.
+      const targetWindow = request.createWindowSpec
+        ? await createOpenTabsWindow(request.createWindowSpec)
+        : request.window;
       const result = await openTabs(
         request.collection,
-        request.window,
+        targetWindow,
         request.newWindow,
         request.trackOpenedWindow !== false
       );

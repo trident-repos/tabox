@@ -383,11 +383,22 @@ function FPSidebar({
                         }
                     }
 
-                    const win = await browser.windows.create(windowCreationObject);
+                    // Send createWindowSpec (not a pre-created window) so the background
+                    // creates the window and opens the tabs atomically - on Firefox,
+                    // focusing a brand-new window destroys this popup/full-page document
+                    // immediately, so any code after `windows.create()` (including the
+                    // old `sendMessage` call) would never run, leaving a blank window.
+                    // NOTE: for multi-collection loops like this one, the popup may still
+                    // die on Firefox right after the FIRST window opens. The remaining
+                    // collections still open correctly (the work is driven by background
+                    // messages), but this loop's own bookkeeping
+                    // (openedCollections/failedCollections below) may not run to
+                    // completion. Acceptable for now - Chrome is unaffected.
                     await browser.runtime.sendMessage({
                         type: 'openTabs',
                         collection,
-                        window: win,
+                        createWindowSpec: windowCreationObject,
+                        newWindow: true,
                     });
                     openedCollections.push({ ...collection, lastOpened: Date.now() });
                 } catch {
