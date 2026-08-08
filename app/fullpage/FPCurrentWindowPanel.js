@@ -5,7 +5,7 @@ import { getColorCode } from '../utils';
 import { highlightText } from '../utils/searchUtils';
 import { browser } from '../../static/globals';
 import { showErrorToast } from '../toastHelpers';
-import { FALLBACK_FAVICON } from '../utils/sharedConstants';
+import { FALLBACK_FAVICON, safeFavIconUrl } from '../utils/sharedConstants';
 import ClickableTabUrl from './ClickableTabUrl';
 import FPBadge from './FPBadge';
 import '../CollectionDetailPanel.css';
@@ -101,7 +101,7 @@ function CurrentWindowTabRow({
                 <div className="column favicon-col">
                     <img
                         className="tab-favicon"
-                        src={tab.favIconUrl || FALLBACK_FAVICON}
+                        src={safeFavIconUrl(tab.favIconUrl)}
                         alt=""
                         onError={(event) => {
                             event.target.src = FALLBACK_FAVICON;
@@ -413,7 +413,7 @@ function FPCurrentWindowPanel({
 
     const tabCount = windowSnapshot.tabs?.length || 0;
     const groupCount = windowSnapshot.chromeGroups?.length || 0;
-    const favicons = (windowSnapshot.tabs || []).slice(0, 8).map((tab) => tab.favIconUrl).filter(Boolean);
+    const favicons = (windowSnapshot.tabs || []).slice(0, 8).map((tab) => safeFavIconUrl(tab.favIconUrl, null)).filter(Boolean);
 
     return (
         <div className={`panel-overlay ${isOpen ? 'visible' : ''}`}>

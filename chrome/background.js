@@ -2784,12 +2784,27 @@ try {
   });
 
   // window events
-  browser.windows.onRemoved.addListener(async windowId => {
+  const handleWindowRemoved = async windowId => {
     let { collectionsToTrack } = await browser.storage.local.get('collectionsToTrack');
     if (!collectionsToTrack || collectionsToTrack.length === 0) { return; }
     collectionsToTrack = collectionsToTrack.filter(c => c.windowId !== windowId);
     await browser.storage.local.set({ collectionsToTrack: collectionsToTrack });
-  }, { windowTypes: ['normal'] });
+  };
+  try {
+    browser.windows.onRemoved.addListener(handleWindowRemoved, { windowTypes: ['normal'] });
+  } catch (error) {
+    if (!(error instanceof TypeError)) throw error;
+    // Firefox throws "Incorrect argument types for windows.onRemoved" for the
+    // { windowTypes } event filter, synchronously, at background-script load
+    // time. Since this call sits at the top level, that throw aborts every
+    // listener registration after it (windows.onCreated/onFocusChanged/
+    // onBoundsChanged, all tabs.* events, etc.) — auto-update, badge, and
+    // window tracking all silently stop working on Firefox. Fall back to
+    // registering the same callback without the filter: it's safe because the
+    // callback body only prunes collectionsToTrack entries by windowId, which
+    // is a correct (and harmless) no-op for non-"normal" window types too.
+    browser.windows.onRemoved.addListener(handleWindowRemoved);
+  }
 
   browser.windows.onCreated.addListener(async () => {
     await handleBadge();

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { highlightText } from '../utils/searchUtils';
+import { safeFavIconUrl } from '../utils/sharedConstants';
 
 function FPCardMatchingTabs({
     matchingTabs = [],
@@ -45,9 +46,9 @@ function FPCardMatchingTabs({
                         onOpenTab?.(tab);
                     }}
                 >
-                    {tab.favIconUrl && (
+                    {safeFavIconUrl(tab.favIconUrl, null) && (
                         <img
-                            src={tab.favIconUrl}
+                            src={safeFavIconUrl(tab.favIconUrl, null)}
                             alt=""
                             className="fp-card-matching-tab-favicon"
                             onError={(event) => { event.target.style.display = 'none'; }}

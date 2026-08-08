@@ -5,7 +5,7 @@ import { getColorCode } from '../utils';
 import { highlightText } from '../utils/searchUtils';
 import { showErrorToast } from '../toastHelpers';
 import { restoreBrowserSession } from '../utils/browserSessions';
-import { FALLBACK_FAVICON } from '../utils/sharedConstants';
+import { FALLBACK_FAVICON, safeFavIconUrl } from '../utils/sharedConstants';
 import ClickableTabUrl from './ClickableTabUrl';
 import FPBadge from './FPBadge';
 import '../CollectionDetailPanel.css';
@@ -75,7 +75,7 @@ function SessionTabRow({ tab, groupColor = null, search }) {
                 <div className="column favicon-col">
                     <img
                         className="tab-favicon"
-                        src={tab.favIconUrl || FALLBACK_FAVICON}
+                        src={safeFavIconUrl(tab.favIconUrl)}
                         alt=""
                         onError={(event) => {
                             event.target.src = FALLBACK_FAVICON;
@@ -219,7 +219,7 @@ function FPSessionPanel({
 
     const tabCount = sessionCollection.tabs?.length || 0;
     const groupCount = sessionCollection.chromeGroups?.length || 0;
-    const favicons = (sessionCollection.tabs || []).slice(0, 8).map((tab) => tab.favIconUrl).filter(Boolean);
+    const favicons = (sessionCollection.tabs || []).slice(0, 8).map((tab) => safeFavIconUrl(tab.favIconUrl, null)).filter(Boolean);
     const sessionLabel = (() => {
         try {
             return timeAgo.format(new Date(sessionTimestamp));

@@ -1,4 +1,4 @@
-import { STORAGE_KEYS, CURRENT_STORAGE_VERSION, generateUid } from '../app/utils/sharedConstants';
+import { STORAGE_KEYS, CURRENT_STORAGE_VERSION, generateUid, safeFavIconUrl, FALLBACK_FAVICON } from '../app/utils/sharedConstants';
 
 describe('STORAGE_KEYS', () => {
     test('contains expected storage key constants', () => {
@@ -62,8 +62,61 @@ describe('generateUid', () => {
 
     test('generates IDs of reasonable length', () => {
         const result = generateUid();
-        
+
         // UUID format is typically 36 chars, random fallback is shorter but still substantial
         expect(result.length).toBeGreaterThanOrEqual(10);
+    });
+});
+
+// Regression: Firefox reports privileged-page favIconUrl values like
+// chrome://mozapps/skin/extensions/extension.svg, and Chrome-authored
+// collections synced/imported from older builds can carry chrome:// favicons
+// too. Extension pages (moz-extension://... / chrome-extension://...) are not
+// allowed to load chrome:// images, which throws a Security Error at render
+// time in Firefox. safeFavIconUrl() is the single render-time guard used at
+// every favicon <img src> site.
+describe('safeFavIconUrl', () => {
+    test('passes through http: URLs', () => {
+        expect(safeFavIconUrl('http://example.com/favicon.ico')).toBe('http://example.com/favicon.ico');
+    });
+
+    test('passes through https: URLs', () => {
+        expect(safeFavIconUrl('https://example.com/favicon.ico')).toBe('https://example.com/favicon.ico');
+    });
+
+    test('passes through data: URLs', () => {
+        const dataUrl = 'data:image/png;base64,aGVsbG8=';
+        expect(safeFavIconUrl(dataUrl)).toBe(dataUrl);
+    });
+
+    test('falls back for chrome: URLs', () => {
+        expect(safeFavIconUrl('chrome://mozapps/skin/extensions/extension.svg')).toBe(FALLBACK_FAVICON);
+    });
+
+    test('falls back for about: URLs', () => {
+        expect(safeFavIconUrl('about:blank')).toBe(FALLBACK_FAVICON);
+    });
+
+    test('falls back for moz-extension: URLs', () => {
+        expect(safeFavIconUrl('moz-extension://abc-123/icon.png')).toBe(FALLBACK_FAVICON);
+    });
+
+    test('falls back for javascript: URLs', () => {
+        expect(safeFavIconUrl('javascript:alert(1)')).toBe(FALLBACK_FAVICON);
+    });
+
+    test('falls back for garbage/unparsable input', () => {
+        expect(safeFavIconUrl('not a url')).toBe(FALLBACK_FAVICON);
+    });
+
+    test('falls back for empty string, null, and undefined', () => {
+        expect(safeFavIconUrl('')).toBe(FALLBACK_FAVICON);
+        expect(safeFavIconUrl(null)).toBe(FALLBACK_FAVICON);
+        expect(safeFavIconUrl(undefined)).toBe(FALLBACK_FAVICON);
+    });
+
+    test('respects a custom fallback (e.g. null, to conditionally skip rendering)', () => {
+        expect(safeFavIconUrl('chrome://mozapps/skin/extensions/extension.svg', null)).toBeNull();
+        expect(safeFavIconUrl('https://example.com/favicon.ico', null)).toBe('https://example.com/favicon.ico');
     });
 });

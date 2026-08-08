@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { MdFolder, MdExpandMore, MdChevronRight } from 'react-icons/md';
-import { SPLIT_MIN_TABS, FALLBACK_FAVICON } from './utils/sharedConstants';
+import { SPLIT_MIN_TABS, FALLBACK_FAVICON, safeFavIconUrl } from './utils/sharedConstants';
 import SplitScanAnimation from './SplitScanAnimation';
 import AiSuggestNameButton from './AiSuggestNameButton';
 import { suggestFolderName } from './ai/tasks/suggestFolderName';
@@ -164,7 +164,7 @@ function SplitCollectionPanel({
                                                 {shown.map((t, ti) => (
                                                     <li key={ti}>
                                                         <img
-                                                            src={t.favIconUrl || FALLBACK_FAVICON}
+                                                            src={safeFavIconUrl(t.favIconUrl)}
                                                             alt=""
                                                             width={14}
                                                             height={14}
@@ -318,7 +318,7 @@ function SplitCollectionPanel({
                                             {shown.map((t, ti) => (
                                                 <li key={ti}>
                                                     <img
-                                                        src={t.favIconUrl || FALLBACK_FAVICON}
+                                                        src={safeFavIconUrl(t.favIconUrl)}
                                                         alt=""
                                                         width={14}
                                                         height={14}

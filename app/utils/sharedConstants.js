@@ -24,6 +24,32 @@ export const FALLBACK_FAVICON = './images/favicon-fallback.png';
 // A collection must have at least this many tabs to qualify for AI splitting.
 export const SPLIT_MIN_TABS = 30;
 
+/**
+ * Returns `url` if it's safe to use as an <img src> for a favicon (protocol
+ * http:, https:, or data: only), otherwise `fallback` (default FALLBACK_FAVICON,
+ * pass `null` to conditionally skip rendering instead).
+ *
+ * Some tabs report privileged-scheme favIconUrl values — Firefox uses
+ * chrome://mozapps/skin/... for its own internal pages, and Chrome-authored
+ * collections synced/imported from older builds can carry chrome:// favicons
+ * too — and an extension page is not allowed to load those as images
+ * (Firefox: "Content at moz-extension://... may not load or link to
+ * chrome://..." Security Error). This is a render-time guard only; it never
+ * mutates the stored favIconUrl value.
+ * @param {unknown} url
+ * @param {string|null} [fallback]
+ * @returns {string|null}
+ */
+export const safeFavIconUrl = (url, fallback = FALLBACK_FAVICON) => {
+    if (typeof url !== 'string' || !url) return fallback;
+    try {
+        const { protocol } = new URL(url);
+        return (protocol === 'http:' || protocol === 'https:' || protocol === 'data:') ? url : fallback;
+    } catch {
+        return fallback;
+    }
+};
+
 // Simple UID generator (same logic throughout the app)
 export const generateUid = () => {
     return (crypto && crypto.randomUUID) ? 
