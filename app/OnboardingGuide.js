@@ -44,7 +44,7 @@ function WelcomeScene({ active }) {
                 <div className="welcome-tabox-header"><strong>Tabox</strong><span>Collections</span></div>
                 <div className="welcome-tabox-search"><MdSearch /></div>
             </div>
-            <div className="welcome-scene-intro">Welcome</div>
+            <div className="welcome-scene-intro"><span>Welcome</span></div>
         </div>
     );
 }

@@ -125,16 +125,19 @@
   z-index:9;
   display:grid;
   place-items:center;
-  color:transparent;
-  background:
-    linear-gradient(90deg, #6757e8, #50c8ff),
-    linear-gradient(150deg, color-mix(in srgb, #6d5be8 12%, var(--bg-color)), color-mix(in srgb, #57badf 9%, var(--bg-color)));
-  background-clip:text, border-box;
-  -webkit-background-clip:text, border-box;
+  background: linear-gradient(150deg, color-mix(in srgb, #6d5be8 12%, var(--bg-color)), color-mix(in srgb, #57badf 9%, var(--bg-color)));
   font-size:54px;
   font-weight:850;
   letter-spacing:-.04em;
   pointer-events:none;
+}
+/* Firefox mispaints `background-clip: text` inside a multi-layer list, so the
+   text gradient lives on its own element with a single-value clip. */
+.welcome-scene-intro span {
+  color:transparent;
+  background:linear-gradient(90deg, #6757e8, #50c8ff);
+  background-clip:text;
+  -webkit-background-clip:text;
 }
 .welcome-scene.is-active .welcome-scene-intro { animation:welcome-scene-intro 3.2s cubic-bezier(.22,.8,.3,1); }
 .welcome-browser-frame { position: absolute; z-index: 3; top: 25px; left: 25px; width: 304px; height: 138px; overflow: hidden; background: var(--bg-color); border: 1px solid var(--divider-color); border-radius: 12px; box-shadow: 0 13px 27px rgba(39,36,82,.16); }
