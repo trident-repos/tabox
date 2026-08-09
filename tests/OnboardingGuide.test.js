@@ -127,6 +127,47 @@ describe('OnboardingGuide', () => {
         expect(sceneTrack).toHaveStyle({ transform: 'translate3d(-100%, 0, 0)' });
     });
 
+    test('navigating keeps the outgoing scene mounted so its animation cannot visibly reset mid-slide', async () => {
+        const { container } = renderGuide({ onboardingEligible: true });
+        await screen.findByRole('dialog');
+
+        const scenes = container.querySelectorAll('.onboarding-scene');
+        const outgoing = scenes[0];
+        const incomingBefore = scenes[1];
+        expect(outgoing).toHaveClass('is-active');
+
+        fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+        const scenesAfter = container.querySelectorAll('.onboarding-scene');
+        // Outgoing scene keeps its DOM node AND is-active (dropping either strips
+        // its .is-active-gated animations and snaps it to frame zero mid-slide)…
+        expect(scenesAfter[0]).toBe(outgoing);
+        expect(scenesAfter[0]).toHaveClass('is-active');
+        // …while the incoming scene remounts so its animation restarts from frame zero.
+        expect(scenesAfter[1]).not.toBe(incomingBefore);
+        expect(scenesAfter[1]).toHaveClass('is-active');
+        // Scenes never visited stay inert.
+        expect(scenesAfter[2]).not.toHaveClass('is-active');
+
+        // Revisiting a scene still remounts it (animation replays).
+        fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+        const scenesBack = container.querySelectorAll('.onboarding-scene');
+        expect(scenesBack[0]).not.toBe(outgoing);
+        expect(scenesBack[0]).toHaveClass('is-active');
+    });
+
+    test('scene keyframes never animate layout properties (left/top/width/height cause per-frame reflow)', () => {
+        const css = fs.readFileSync(path.join(__dirname, '../app/OnboardingGuide.css'), 'utf8');
+        const keyframeBlocks = css.match(/@keyframes[^{]+\{(?:[^{}]*\{[^{}]*\})+\s*\}/g) || [];
+        expect(keyframeBlocks.length).toBeGreaterThan(0);
+        const layoutAnimating = keyframeBlocks.filter((block) =>
+            /[{;]\s*(left|top|right|bottom)\s*:/.test(block)
+        );
+        // Morph/typing effects legitimately animate width/height (intrinsic morphs);
+        // absolute offsets (left/top) must use transform instead.
+        expect(layoutAnimating).toEqual([]);
+    });
+
     test('feature animations are single-run timelines with no infinite loops', () => {
         const css = fs.readFileSync(path.join(__dirname, '../app/OnboardingGuide.css'), 'utf8');
         const source = fs.readFileSync(path.join(__dirname, '../app/OnboardingGuide.js'), 'utf8');
@@ -145,7 +186,7 @@ describe('OnboardingGuide', () => {
         expect(source).not.toContain('welcome-tabox-target');
         expect(source.match(/welcome-saved-box/g)).toHaveLength(1);
         expect(css).toContain('translate(var(--tab-flight-x),68px) scale(.14)');
-        expect(css).toContain('left:calc(100% - 217px); top:97px; opacity:1');
+        expect(css).toContain('transform:translate(calc(100cqw - 302px), 1px) scale(1)');
         expect(css).toContain('padding:8px 13px; border:1px solid');
         expect(css).toContain('font-size:12px; font-weight:750');
         expect(css).toContain('.save-demo-label svg { font-size:16px; }');
