@@ -66,3 +66,9 @@ Notes for reviewers:
 - `browser-polyfill.min.js` is copied verbatim from the `webextension-polyfill` npm
   package (see `yarn.lock` for the exact version).
 - No remote code is loaded or executed at runtime; all JS ships in the package.
+
+## License
+
+Tabox is **source-available**: the code is published for transparency, security
+review, and extension-store source verification. It is not open source — see
+[LICENSE](LICENSE) for what you may and may not do with it.
