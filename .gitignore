@@ -51,3 +51,4 @@ site/pricing/pricing.html
 .env.local
 .env*.local
 server/.wrangler/
+tabox-firefox-*.zip
