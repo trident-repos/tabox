@@ -1,0 +1,106 @@
+Tabox is the tab manager that saves your tabs, tab groups, and browsing sessions into organized collections you can restore with one click, sync across devices, and share with anyone.
+
+Too many open tabs? Tabox turns tab chaos into tidy, named collections. Save all your open tabs and tab groups in one click, close them to free up memory, and reopen the exact same session later with windows, groups, colors, and order intact. It's the fast, private way to organize tabs, manage browser sessions, and never lose an important tab again.
+
+▶ WHY TABOX?
+
+★ One-click save & restore: capture every open tab and tab group as a named collection, then bring the whole session back exactly as you left it.
+★ Full tab groups support: Tabox preserves Firefox tab group names, colors, and order — the tab group manager your browser is missing.
+★ Folders & drag-and-drop: organize collections into folders for work, study, research, travel planning, shopping, or any workflow.
+★ Sync across devices & browsers: connect Google Drive and your collections follow you to every computer — and even to Chrome or Edge if you use Tabox there too. Your data stays in YOUR Drive, not on our servers.
+★ Share & collaborate: share collections with teammates via a simple link, or create shared folders where everyone sees updates, comments, and changes in real time.
+★ AI-powered organization: let Tabox AI group related tabs, clean up duplicates, rename collections, and sort everything into folders automatically.
+★ Fast, light, and private: Tabox works locally, requests minimal permissions, and never sells or mines your browsing data.
+
+▶ CORE FEATURES: FREE
+
+✔ Save all open tabs (or just the current window) into a named collection
+✔ Save and restore Firefox tab groups with their names and colors
+✔ One-click session restore: reopen a collection in the current window or a new one
+✔ Add the current tab to any existing collection instantly
+✔ Auto-update: keep a collection in sync with a window as you browse
+✔ Organize collections into folders with drag-and-drop
+✔ Instant search across all your saved tabs and collections
+✔ Command palette (Ctrl/Cmd+K) puts every action a keystroke away
+✔ Full-page view for managing large tab libraries on a big canvas
+✔ Import & export collections as files for easy backup and hand-off
+✔ Keyboard shortcuts and right-click context menu integration
+✔ Light and dark themes that follow your system
+✔ Also available for Chrome and Edge, with your collections synced between browsers via Google Drive
+
+▶ SYNC & BACKUP WITH GOOGLE DRIVE
+
+Sign in with Google and Tabox syncs your collections to your own Google Drive. Open a new laptop, sign in, and your entire tab library is there. Because your data lives in your Drive, you stay in control: Tabox never stores your tabs on third-party servers. Automatic backups protect you from accidental deletions, and import/export gives you portable copies whenever you want them.
+
+▶ SHARE TABS & COLLABORATE
+
+Stop pasting lists of links into chat. With Tabox you can:
+
+• Share any collection via a link, so recipients open the full set of tabs in one click
+• Create shared folders with your team, classmates, or family
+• See who changed what, with member photos and activity updates
+• Discuss collections with built-in comments
+• Get notified when a shared collection is updated
+
+Perfect for onboarding new teammates, sharing research with co-authors, planning trips together, or handing a client every relevant page in one link.
+
+▶ TABOX AI: YOUR TAB LIBRARY, ORGANIZED FOR YOU
+
+Tabox Pro includes AI tools that do the tedious organizing for you:
+
+• Smart Tab Grouping: automatically group related open tabs into meaningful, named tab groups
+• Duplicate-tab sweep: find and clean duplicate tabs across your collections, with a preview before anything changes
+• Auto-rename collections: generate clear, descriptive names for your saved sessions
+• Auto-arrange into folders: sort a messy list of collections into a sensible folder structure
+• Split a collection: break an oversized collection into focused, smaller ones
+• AI name suggestions: get instant title ideas when saving
+
+Every AI action shows a preview and supports undo, so you're always in control. AI tasks run in the background: close the popup and they keep working.
+
+▶ WHO USES TABOX?
+
+• Developers & designers: keep a collection per project, ticket, or code review
+• Researchers & students: save sources per paper, course, or topic and share them with your group
+• Writers & journalists: park research sessions and reopen them when you're ready to write
+• Sales, support & recruiters: one collection per account, candidate, or case
+• Planners & shoppers: compare products, plan trips, and share the shortlist
+• Anyone with 40 tabs open right now: save them, close them, breathe
+
+▶ TABOX PRO
+
+The core tab manager is free. Tabox Pro adds Tabox AI, advanced collaboration, and priority support for $5.99/month or $59.99/year, with a fair refund policy. Upgrade right from the extension.
+
+▶ PRIVACY FIRST
+
+Your browsing data belongs to you. Tabox stores collections locally in your browser and, if you enable sync, in your own Google Drive. We don't sell data, we don't show ads, and we request only the permissions the features need. Read the full privacy policy: https://www.tabox.co/privacy
+
+▶ FREQUENTLY ASKED QUESTIONS
+
+Q: Is Tabox a session manager or a tab manager?
+A: Both. Tabox saves complete browsing sessions (all windows and tab groups) and also lets you curate collections tab by tab, so it replaces both a session manager and a "read later" pile of bookmarks.
+
+Q: How is Tabox different from bookmarks?
+A: Bookmarks save one page at a time and quickly turn into a junk drawer. Tabox saves entire sessions with their tab-group structure, restores them in one click, keeps them synced across devices, and lets you share them as living, collaborative collections.
+
+Q: What happens to my tab groups?
+A: They're preserved exactly, including names, colors, and tab order. When you restore a collection, your tab groups come back just as you saved them.
+
+Q: Does Tabox slow down my browser?
+A: No, the opposite. Saving a collection lets you close dozens of tabs, freeing memory and CPU while keeping everything one click away.
+
+Q: Do I need an account?
+A: No account is needed for saving and organizing locally. Sign in with Google only if you want cross-device sync, sharing, or AI features.
+
+Q: I also use Chrome or Edge — do my collections carry over?
+A: Yes. Install Tabox there too, sign in with the same Google account, and Google Drive sync keeps your collections identical across Firefox, Chrome, and Edge.
+
+Q: Can I recover tabs if I close a window by accident?
+A: If the window was saved (or auto-updating) in a collection, yes. Just restore it. Many users keep an auto-updated collection as a live safety net.
+
+▶ LINKS
+
+Homepage: https://www.tabox.co
+Privacy Policy: https://www.tabox.co/privacy
+Terms of Service: https://www.tabox.co/terms
+
+Save your tabs. Clear your mind. Install Tabox and turn tab overload into organized, shareable collections, free.
