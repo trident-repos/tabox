@@ -30,7 +30,7 @@
     "groups"
   ],
   "author": "Gil Goldstein",
-  "license": "ISC",
+  "license": "UNLICENSED",
   "browserslist": [
     "Chrome >= 89",
     "Edge >= 89",
