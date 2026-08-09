@@ -4,6 +4,14 @@
 // token to the extension via externally_connectable messaging.
 export const TABOX_EXTENSION_ID = 'bdbliblipiempfdkkkjohnecmeknnpoa';
 const STORE_URL = `https://chromewebstore.google.com/detail/${TABOX_EXTENSION_ID}`;
+// The origin share links used before the share.tbxpro.app custom domain.
+// Extensions up to 4.2 list ONLY this origin in externally_connectable, so a
+// share.tbxpro.app join page can never handshake with them (Chrome doesn't
+// even expose chrome.runtime there). When detection fails anywhere else, the
+// page hops to this origin once and retries — 4.2 installs handshake there,
+// genuinely-uninstalled users fall through to the install screen as before.
+// Remove once pre-4.3 installs have aged out.
+export const LEGACY_SHARE_ORIGIN = 'https://tabox-api.gilgold13.workers.dev';
 
 export const JOIN_PAGE_HTML = `<!doctype html>
 <html lang="en">
@@ -44,6 +52,7 @@ export const JOIN_PAGE_HTML = `<!doctype html>
 <script>
 (function () {
   var EXT_ID = '${TABOX_EXTENSION_ID}';
+  var LEGACY_ORIGIN = '${LEGACY_SHARE_ORIGIN}';
   var token = decodeURIComponent(location.pathname.split('/').pop() || '');
   var el = function (id) { return document.getElementById(id); };
   var show = function (id) { el(id).classList.remove('hidden'); };
@@ -117,6 +126,14 @@ export const JOIN_PAGE_HTML = `<!doctype html>
   }
 
   function notInstalled(info) {
+    // Failed handshake off the legacy origin: could be a pre-4.3 install
+    // that only allows LEGACY_ORIGIN in externally_connectable. Retry there
+    // once before declaring Tabox missing. Same-origin check (not a query
+    // marker) is the loop guard: on the legacy origin this branch is dead.
+    if (location.origin !== LEGACY_ORIGIN) {
+      location.replace(LEGACY_ORIGIN + '/join/' + encodeURIComponent(token));
+      return;
+    }
     setStatus('Install the Tabox extension, then reload this page to ' + (info.kind === 'folder' ? 'join the folder.' : 'add the collection.'), '');
     show('install');
   }

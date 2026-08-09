@@ -13,7 +13,7 @@ const MAX_CODE_LENGTH = 2048;
 const MAX_ERROR_LENGTH = 256;
 const ALLOWED_TARGET_SUFFIX = '.extensions.allizom.org';
 
-function badRequest() {
+export function badRequest() {
   return new Response(JSON.stringify({ error: 'invalid_request' }), {
     status: 400,
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
@@ -30,7 +30,7 @@ function b64uDecode(str) {
 // state is base64url JSON `{ t: <target url>, n: <nonce> }`. The Worker only
 // ever extracts `t` to decide where to redirect; it treats `n` as opaque and
 // echoes the whole original state string back verbatim.
-function parseState(rawState) {
+export function parseState(rawState) {
   if (typeof rawState !== 'string' || rawState.length === 0 || rawState.length > MAX_STATE_LENGTH) {
     return null;
   }
@@ -52,7 +52,7 @@ function parseState(rawState) {
 // host (`evil-extensions.allizom.org.evil.com`) — both fail this check
 // because URL parsing resolves the true hostname first, and endsWith()
 // requires the literal leading dot to be part of the host.
-function isValidTarget(rawTarget) {
+export function isValidTarget(rawTarget) {
   try {
     const u = new URL(rawTarget);
     return u.protocol === 'https:' && u.hostname.endsWith(ALLOWED_TARGET_SUFFIX);

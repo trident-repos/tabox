@@ -82,15 +82,18 @@ describe('OAuth config', () => {
             expect(createAuthEndpoint()).toBe(expected);
         });
 
-        test('createAuthEndpoint on a non-chromiumapp redirect uses the Worker callback as redirect_uri and packs {t, n} into state', () => {
+        test('createAuthEndpoint on a non-chromiumapp redirect starts at the Worker /auth/start and packs {t, n} into state', () => {
             const { createAuthEndpoint, base64UrlDecodeJson } = setupGlobals(ALLIZOM_REDIRECT);
             const nonce = 'nonce-abc-123';
 
             const url = new URL(createAuthEndpoint(nonce));
 
-            expect(url.origin + url.pathname).toBe('https://accounts.google.com/o/oauth2/v2/auth');
-            expect(url.searchParams.get('redirect_uri')).toBe(`${proConfig.PRO_API_BASE}/auth/callback`);
-            expect(url.searchParams.get('client_id')).toBe(proConfig.OAUTH_CLIENT_ID);
+            expect(url.origin + url.pathname).toBe(`${proConfig.PRO_API_BASE}/auth/start`);
+            // Firefox's launchWebAuthFlow rejects the whole flow ("redirect_uri
+            // not allowed", before any window opens) unless the URL's
+            // redirect_uri param starts with identity.getRedirectURL() — the
+            // regression behind the dead Firefox sign-in button. Pin it.
+            expect(url.searchParams.get('redirect_uri')).toBe(ALLIZOM_REDIRECT);
 
             const rawState = url.searchParams.get('state');
             expect(rawState).toBeTruthy();
@@ -177,6 +180,9 @@ describe('OAuth config', () => {
             global.browser = browser;
             global.chrome = { runtime: browser.runtime };
             global.importScripts = jest.fn();
+            // background.js registers push listeners on `self` at top level
+            // (MV3 SW requirement); jest's node environment has no `self`.
+            global.self = { addEventListener: jest.fn() };
             global.getAuthToken = jest.fn(async () => 'access-token');
             global.logSyncOperation = jest.fn();
             // No crypto.randomUUID stub needed: the login handler generates
@@ -204,6 +210,7 @@ describe('OAuth config', () => {
             delete global.browser;
             delete global.chrome;
             delete global.importScripts;
+            delete global.self;
             delete global.getAuthToken;
             delete global.logSyncOperation;
             delete global.OAUTH_CLIENT_ID;

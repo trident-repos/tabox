@@ -18,6 +18,13 @@ describe('GET /join/:token', () => {
     expect(html).not.toContain('sometoken'); // static template, token never interpolated
   });
 
+  it('falls back to the legacy workers.dev origin when the handshake fails off it (pre-4.3 installs only allow that origin in externally_connectable)', () => {
+    expect(JOIN_PAGE_HTML).toContain("var LEGACY_ORIGIN = 'https://tabox-api.gilgold13.workers.dev'");
+    // The hop must be origin-guarded (loop protection) and re-encode the token.
+    expect(JOIN_PAGE_HTML).toContain('if (location.origin !== LEGACY_ORIGIN)');
+    expect(JOIN_PAGE_HTML).toContain("location.replace(LEGACY_ORIGIN + '/join/' + encodeURIComponent(token))");
+  });
+
   it('separates install detection (ping) from the redeem, which gets a long timeout', () => {
     // Ping decides installed-vs-not; the redeem may take seconds (cold SW +
     // network + join) and must never be mistaken for "not installed".

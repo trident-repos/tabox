@@ -1679,10 +1679,11 @@ async function updateLocalDataFromServer(token, force = false, skipLock = false)
 // Firefox's identity.getRedirectURL() returns a per-profile
 // https://<uuid>.extensions.allizom.org/ URL that cannot be pre-registered
 // with Google, unlike Chrome's stable *.chromiumapp.org redirect. So on
-// Firefox we send Google a fixed, registered redirect (the Tabox Worker's
-// /auth/callback) and pack the real per-profile redirect into `state`; the
-// Worker 302s back to it with the code (see
-// docs/superpowers/plans/2026-08-06-firefox-port-phase2-oauth.md).
+// Firefox the flow enters through the Tabox Worker's /auth/start (see
+// createAuthEndpoint below and server/src/authStart.js), Google gets the
+// fixed, registered /auth/callback redirect, and the real per-profile
+// redirect rides in `state`; the Worker's callback 302s back to it with the
+// code (see docs/superpowers/plans/2026-08-06-firefox-port-phase2-oauth.md).
 // Branches ONLY on the getRedirectURL() value (capability/value detection),
 // never on user agent.
 const CHROMIUMAPP_REDIRECT_SUFFIX = '.chromiumapp.org';
@@ -1780,16 +1781,23 @@ function createAuthEndpoint(nonce) {
         const authParams = new URLSearchParams(authParamsInit);
         return `https://accounts.google.com/o/oauth2/v2/auth?${authParams.toString()}`;
     }
-    // Firefox (and any other non-chromiumapp redirect): route through the
-    // Worker's fixed callback, packing the real per-profile redirect + a
-    // per-attempt CSRF nonce into `state`. The Worker treats `state` as
-    // opaque apart from extracting the target; the client verifies `n`
-    // against the nonce it generated before trusting the returned code.
+    // Firefox (and any other non-chromiumapp redirect): Firefox's
+    // launchWebAuthFlow validates the `redirect_uri` query param of the URL
+    // it is given against identity.getRedirectURL() and rejects everything
+    // else with "redirect_uri not allowed" BEFORE opening any window — so
+    // Google's auth endpoint (which needs the registered Worker callback as
+    // redirect_uri) can't be passed to it directly. Instead the flow starts
+    // at the Worker's /auth/start with redirect_uri = the per-profile
+    // allizom URL (satisfying Firefox's validator); the Worker 302s to
+    // Google with its registered /auth/callback, which later 302s back to
+    // the allizom target packed into `state` — the navigation
+    // launchWebAuthFlow intercepts. The per-attempt CSRF nonce also rides
+    // in `state`; the client verifies `n` before trusting the returned code.
     const authParams = new URLSearchParams({
-        ...authParamsInit,
+        redirect_uri: target,
         state: base64UrlEncodeJson({ t: target, n: nonce }),
     });
-    return `https://accounts.google.com/o/oauth2/v2/auth?${authParams.toString()}`;
+    return `${AUTH_API_BASE}/auth/start?${authParams.toString()}`;
 }
 
 // Shared UID generator - SYNCHRONIZED WITH app/utils/sharedConstants.js

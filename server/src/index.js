@@ -27,6 +27,7 @@ import { validateAIRequest, completeAI } from './aiProxy.js';
 import { handlePushSubscribe, handlePushUnsubscribe } from './pushRoutes.js';
 import { notifyEmails, notifyFolderMembers } from './pushNotify.js';
 import { handleAuthCallback } from './authCallback.js';
+import { handleAuthStart } from './authStart.js';
 
 // How long an unlinked subscription event stays parked awaiting its transaction.
 // Paddle retries webhooks for ~3 days; 30 days leaves ample slack.
@@ -536,6 +537,7 @@ export default {
     }
     if (request.method === 'POST' && url.pathname === '/auth/token') return handleAuthToken(request, env);
     if (request.method === 'GET' && url.pathname === '/auth/callback') return handleAuthCallback(request);
+    if (request.method === 'GET' && url.pathname === '/auth/start') return handleAuthStart(request, env);
     if (request.method === 'GET' && url.pathname === '/entitlement') return handleEntitlement(request, env);
     if (request.method === 'POST' && url.pathname === '/ai/complete') return handleAIComplete(request, env);
     if (request.method === 'GET' && url.pathname === '/subscription') return handleGetSubscription(request, env);
