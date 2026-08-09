@@ -1,4 +1,5 @@
 const path = require("path");
+const webpack = require("webpack");
 const HtmlWebpackPlugin = require("html-webpack-plugin");
 const CopyPlugin = require("copy-webpack-plugin");
 const baseManifest = require("./chrome/manifest.json");
@@ -122,7 +123,12 @@ module.exports = (env = {}, argv) => {
       hints: false,
     },
     
+    // All target browsers have globalThis; without this webpack injects a
+    // `new Function("return this")` shim that AMO's validator flags as eval.
+    node: { global: false },
+
     plugins: [
+      new webpack.DefinePlugin({ global: "globalThis" }),
       new HtmlWebpackPlugin({
         title: "Tabox - Save and Share Tab Groups",
         meta: {

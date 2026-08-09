@@ -388,6 +388,26 @@ function App({ mode = 'popup' }) {
     });
   }, [getCurrentCollectionSortOptions, setSettingsData]);
 
+  // Declared before reloadCollectionsAndFoldersFromStorage, whose dependency
+  // array references it (const TDZ — must be initialized first).
+  const refreshLastSyncTimeFromStorage = useCallback(async ({ fallbackToNow = false } = {}) => {
+    const { lastSuccessfulSyncTime } = await browser.storage.local.get('lastSuccessfulSyncTime');
+
+    if (lastSuccessfulSyncTime) {
+      setLastSyncTime(lastSuccessfulSyncTime);
+      return lastSuccessfulSyncTime;
+    }
+
+    if (fallbackToNow) {
+      const now = Date.now();
+      setLastSyncTime(now);
+      return now;
+    }
+
+    setLastSyncTime(null);
+    return null;
+  }, [setLastSyncTime]);
+
   const reloadCollectionsAndFoldersFromStorage = useCallback(async ({ updateSyncTime = false } = {}) => {
     try {
       const { sortBy, sortOrder } = await getCurrentCollectionSortOptions();
@@ -436,24 +456,6 @@ function App({ mode = 'popup' }) {
     setTrackedCollectionUids(new Set((collectionsToTrack || []).map(item => item.collectionUid)));
   }, []);
 
-  const refreshLastSyncTimeFromStorage = useCallback(async ({ fallbackToNow = false } = {}) => {
-    const { lastSuccessfulSyncTime } = await browser.storage.local.get('lastSuccessfulSyncTime');
-
-    if (lastSuccessfulSyncTime) {
-      setLastSyncTime(lastSuccessfulSyncTime);
-      return lastSuccessfulSyncTime;
-    }
-
-    if (fallbackToNow) {
-      const now = Date.now();
-      setLastSyncTime(now);
-      return now;
-    }
-
-    setLastSyncTime(null);
-    return null;
-  }, [setLastSyncTime]);
-  
   const markDataHydrationComplete = useCallback(() => {
     if (!performanceMarksRef.current.data) {
       markPerformancePoint('data-ready');

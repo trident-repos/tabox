@@ -820,17 +820,6 @@ function FPContentArea({
     }, [isLightweightView, updateSelectedCollectionUids]);
 
     useEffect(() => {
-        setSelectedTabSessionEntryKeys((previous) => {
-            if (previous.size === 0) {
-                return previous;
-            }
-
-            const next = new Set([...previous].filter((entryKey) => visibleSingleTabEntryKeySet.has(entryKey)));
-            return next.size === previous.size ? previous : next;
-        });
-    }, [visibleSingleTabEntryKeySet]);
-
-    useEffect(() => {
         const timer = setTimeout(() => setShowEntranceAnimation(false), 450);
         return () => clearTimeout(timer);
     }, []);
@@ -888,7 +877,6 @@ function FPContentArea({
 
     const sourceCollections = optimisticCollections || collections;
     const hasSearchQuery = !!search?.trim();
-    const disableCollectionDragAndDrop = disableDrag || hasSelectedCollections || hasSearchQuery;
     const viewModeToggleTooltip = hasSearchQuery
         ? 'View mode is unavailable while search is active'
         : viewMode === 'grid'
@@ -978,6 +966,19 @@ function FPContentArea({
         () => new Set(visibleSingleTabSessionEntries.map((entry) => entry.sessionEntryKey)),
         [visibleSingleTabSessionEntries],
     );
+
+    // Prune selections that are no longer visible. Lives below the memo it
+    // depends on (const TDZ — the dependency array reads it at render time).
+    useEffect(() => {
+        setSelectedTabSessionEntryKeys((previous) => {
+            if (previous.size === 0) {
+                return previous;
+            }
+
+            const next = new Set([...previous].filter((entryKey) => visibleSingleTabEntryKeySet.has(entryKey)));
+            return next.size === previous.size ? previous : next;
+        });
+    }, [visibleSingleTabEntryKeySet]);
 
     const selectedVisibleTabSessionEntries = useMemo(
         () => visibleSingleTabSessionEntries.filter((entry) => selectedTabSessionEntryKeys.has(entry.sessionEntryKey)),
@@ -1199,6 +1200,8 @@ function FPContentArea({
     );
 
     const hasSelectedCollections = selectedVisibleCollections.length > 0;
+    // Lives below hasSelectedCollections, which it reads at render time (const TDZ).
+    const disableCollectionDragAndDrop = disableDrag || hasSelectedCollections || hasSearchQuery;
     const allVisibleCollectionsSelected = visibleCollections.length > 0 &&
         selectedVisibleCollections.length === visibleCollections.length;
     const hasSelectedCollectionsInFolders = selectedVisibleCollections.some((collection) => !!collection.parentId);

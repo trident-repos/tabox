@@ -31,6 +31,11 @@
   ],
   "author": "Gil Goldstein",
   "license": "ISC",
+  "browserslist": [
+    "Chrome >= 89",
+    "Edge >= 89",
+    "Firefox >= 140"
+  ],
   "bugs": {
     "url": "https://github.com/gilgold/tabox/issues"
   },
