@@ -173,8 +173,8 @@ module.exports = (env = {}, argv) => {
       }),
       new CopyPlugin({
         patterns: [
-          { from: "chrome/icons", to: "icons" },
-          { from: "static/images", to: "images" },
+          { from: "chrome/icons", to: "icons", globOptions: { ignore: ["**/.DS_Store"] } },
+          { from: "static/images", to: "images", globOptions: { ignore: ["**/.DS_Store"] } },
           { from: "static/globals.js", to: "[name][ext]" },
           { from: "static/deferedLoading.*", to: "[name][ext]" },
           { from: "chrome/*.js", to: "[name][ext]", globOptions: { ignore: ["**/buildManifest.js"] } },

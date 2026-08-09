@@ -27,8 +27,12 @@ describe('buildManifest', () => {
         const ff = buildManifest(baseManifest, 'firefox');
         expect(ff.browser_specific_settings.gecko).toEqual({
             id: 'tabox@tabox.co',
-            strict_min_version: '139.0',
+            // data_collection_permissions needs Firefox 140+ (142+ on Android)
+            strict_min_version: '140.0',
             data_collection_permissions: { required: ['browsingActivity'] }
+        });
+        expect(ff.browser_specific_settings.gecko_android).toEqual({
+            strict_min_version: '142.0'
         });
     });
 

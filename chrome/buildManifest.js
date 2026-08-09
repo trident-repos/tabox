@@ -53,8 +53,12 @@ function buildManifest(base, target) {
         browser_specific_settings: {
             gecko: {
                 id: 'tabox@tabox.co',
-                strict_min_version: '139.0',
+                // data_collection_permissions requires Firefox 140+ (142+ on Android).
+                strict_min_version: '140.0',
                 data_collection_permissions: { required: ['browsingActivity'] },
+            },
+            gecko_android: {
+                strict_min_version: '142.0',
             },
         },
     };
