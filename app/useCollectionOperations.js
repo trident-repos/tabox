@@ -374,7 +374,28 @@ export function useCollectionOperations({
         const { collectionsToTrack } = await browser.storage.local.get('collectionsToTrack') || [];
         const activeWindowId = collectionsToTrack.find(c => c.collectionUid === collection.uid)?.windowId;
         if (!activeWindowId) return;
-        
+
+        // A tracking entry can go stale: the tracked window may be gone, or may no
+        // longer contain any of the collection's tabs (e.g. the collection was opened
+        // into the current window and its tabs were closed one by one — windows.onRemoved
+        // never fires, so the entry lingers and "Open" would silently focus forever;
+        // issue #90/#99). Verify before focusing; if stale, drop the entry and open.
+        const stillOpenInWindow = await (async () => {
+            try {
+                const win = await browser.windows.get(activeWindowId, { populate: true });
+                const collectionUrls = (collection.tabs || []).map(t => t.url).filter(Boolean);
+                return (win.tabs || []).some(t =>
+                    collectionUrls.some(u => t.url === u || (t.url && t.url.includes(encodeURIComponent(u)))));
+            } catch {
+                return false; // window no longer exists
+            }
+        })();
+        if (!stillOpenInWindow) {
+            await _handleStopTracking();
+            await openCollectionTabs({ collectionToOpen: collection });
+            return;
+        }
+
         const msg = {
             type: 'focusWindow',
             windowId: activeWindowId
@@ -403,6 +424,14 @@ export function useCollectionOperations({
     };
 
     const _isAutoUpdate = async () => {
+        // Must mirror the row UI's loadAutoUpdateStatus (CollectionListItem.js): a
+        // collection only behaves as auto-tracked when the auto-update setting is ON.
+        // Every open registers a collectionsToTrack entry (trackOpenedWindow defaults
+        // to true), so checking membership alone made _handleOpenTabs reroute every
+        // second "Open" click to a window-focus no-op while the button still said
+        // "Open" (issue #90/#99).
+        const { chkEnableAutoUpdate } = await browser.storage.local.get('chkEnableAutoUpdate');
+        if (!chkEnableAutoUpdate) return false;
         let { collectionsToTrack } = await browser.storage.local.get('collectionsToTrack');
         collectionsToTrack = collectionsToTrack || [];
         return collectionsToTrack.some(c => c.collectionUid === collection.uid);

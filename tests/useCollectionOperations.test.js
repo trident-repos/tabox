@@ -311,6 +311,12 @@ describe('useCollectionOperations', () => {
         browser.storage.local.get.mockResolvedValue({
             collectionsToTrack: [{ collectionUid: 'collection-1', windowId: 88 }],
         });
+        // The tracked window still holds one of the collection's tabs, so the
+        // staleness guard (issue #90) lets the focus path proceed.
+        browser.windows.get.mockResolvedValue({
+            id: 88,
+            tabs: [{ id: 5, url: 'https://example.com' }],
+        });
 
         renderWithProviders(
             <HookHarness
@@ -330,6 +336,38 @@ describe('useCollectionOperations', () => {
         expect(updateCollection).toHaveBeenCalledWith(expect.objectContaining({
             uid: 'collection-1',
             lastOpened: expect.any(Number),
+        }));
+    });
+
+    test('reopens instead of focusing when the tracked window no longer holds the collection tabs (issue #90)', async () => {
+        const updateCollection = jest.fn(async () => true);
+        browser.storage.local.get.mockResolvedValue({
+            collectionsToTrack: [{ collectionUid: 'collection-1', windowId: 88 }],
+        });
+        // Tracked window still exists but the collection's tabs were all closed.
+        browser.windows.get.mockResolvedValue({ id: 88, tabs: [{ id: 5, url: 'chrome://newtab/' }] });
+        browser.runtime.sendMessage.mockResolvedValue({ ok: true });
+
+        renderWithProviders(
+            <HookHarness
+                collection={collection}
+                updateCollection={updateCollection}
+            />,
+        );
+
+        await act(async () => {
+            await latestOperations._handleFocusWindow();
+        });
+
+        // The stale tracking entry is dropped...
+        expect(browser.storage.local.set).toHaveBeenCalledWith({ collectionsToTrack: [] });
+        // ...and the collection actually opens instead of a silent focus no-op.
+        expect(browser.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'openTabs',
+            collection: expect.objectContaining({ uid: 'collection-1' }),
+        }));
+        expect(browser.runtime.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({
+            type: 'focusWindow',
         }));
     });
 
