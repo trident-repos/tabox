@@ -1045,18 +1045,22 @@ async function openTabs(collection, window, newWindow = null, trackOpenedWindow 
   const incognitoRestoreAttempted = wasFromIncognito && newWindow !== null;
   const incognitoRestoreSuccess = wasFromIncognito && isIncognitoWindow;
   
-  // Load settings once upfront
+  // Load settings once upfront. chkIgnoreDuplicates must be read unconditionally:
+  // the old `newWindow ?? get(...)` short-circuited to `false` whenever the popup
+  // sent newWindow:false (every same-window open), so "if a tab already exists,
+  // do not open it" was silently ignored — issue #94. Dedupe only applies to
+  // same-window opens; a freshly created window has no tabs worth skipping.
   const [
     { chkIgnoreDuplicates },
     { chkEnableTabDiscard }
   ] = await Promise.all([
-    newWindow ?? browser.storage.local.get('chkIgnoreDuplicates'),
+    browser.storage.local.get('chkIgnoreDuplicates'),
     browser.storage.local.get('chkEnableTabDiscard')
   ]);
-  
+
   // Pre-filter duplicates and prepare tab data
   const currentUrlsInWindow = window.tabs ? window.tabs.map(t => t.url) : [];
-  const duplicateUrls = chkIgnoreDuplicates ? new Set(currentUrlsInWindow) : new Set();
+  const duplicateUrls = (chkIgnoreDuplicates && !newWindow) ? new Set(currentUrlsInWindow) : new Set();
   const runtimeUrl = browser.runtime.getURL('deferedLoading.html');
   
   // URLs that cannot be opened in incognito mode

@@ -890,29 +890,50 @@ const handleContextMenuCreation = async () => {
     }, 5000); // 5 seconds throttle
 }
 
-function applyChromeGroupSettings(windowId, collection) {
+async function applyChromeGroupSettings(windowId, collection) {
     if (!collection.chromeGroups || !browser.tabs.group || !browser.tabGroups) {
         return;
     }
-    collection.chromeGroups.forEach((chromeGroup) => {
-        const tabsToGroup = collection.tabs.filter(({ groupId }) => chromeGroup.id === groupId).map((t) => t.newTabId);
-        const groupProperties = {
-            createProperties: {
-                windowId: windowId
-            },
-            tabIds: tabsToGroup
+    // Reuse groups already in the target window instead of minting an identical
+    // one on every open (issue #94 — Chrome additionally saves each created group
+    // to its Tab Groups menu, so duplicates piled up there). "Same group" matches
+    // the app's own duplicate-group definition: identical title AND color.
+    let existingGroups = [];
+    try {
+        existingGroups = await browser.tabGroups.query({ windowId });
+    } catch {
+        existingGroups = [];
+    }
+    for (const chromeGroup of collection.chromeGroups) {
+        const tabsToGroup = collection.tabs
+            .filter(({ groupId }) => chromeGroup.id === groupId)
+            .map((t) => t.newTabId)
+            .filter((id) => id !== undefined && id !== null);
+        if (tabsToGroup.length === 0) {
+            continue; // e.g. all of this group's tabs were dedupe-skipped
         }
         const updateProperties = {
             collapsed: chromeGroup.collapsed,
             color: chromeGroup.color,
             title: chromeGroup.title
         };
-        if (tabsToGroup && tabsToGroup.length > 0) {
-            browser.tabs.group(groupProperties).then((groupId) => {
-                browser.tabGroups.update(groupId, updateProperties)
-            });
+        try {
+            const match = existingGroups.find((g) => g.title === chromeGroup.title && g.color === chromeGroup.color);
+            if (match) {
+                await browser.tabs.group({ groupId: match.id, tabIds: tabsToGroup });
+                await browser.tabGroups.update(match.id, updateProperties);
+            } else {
+                const groupId = await browser.tabs.group({
+                    createProperties: { windowId: windowId },
+                    tabIds: tabsToGroup
+                });
+                await browser.tabGroups.update(groupId, updateProperties);
+                existingGroups.push({ id: groupId, ...updateProperties });
+            }
+        } catch (e) {
+            console.error('Failed to apply group settings for group', chromeGroup.title, e);
         }
-    });
+    }
 }
 
 // ─── Smart Organize: apply + undo ────────────────────────────────────────────
