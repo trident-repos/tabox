@@ -345,10 +345,5 @@ exports[`Collection List Options tests CollectionListOptions renders correctly 1
       </div>
     </div>
   </div>
-  <input
-    accept=".txt"
-    style="display: none;"
-    type="file"
-  />
 </div>
 `;
