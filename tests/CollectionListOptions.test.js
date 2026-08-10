@@ -70,6 +70,90 @@ describe('Collection List Options tests', () => {
     expect(container.querySelector('input[type="file"]')).toHaveAttribute('accept', '.txt');
   });
 
+  test('shows the full-page modal instead of the file picker on Linux (issue #68)', async () => {
+    browser.runtime.getPlatformInfo = jest.fn().mockResolvedValue({ os: 'linux' });
+    browser.runtime.getURL = jest.fn((path) => `chrome-extension://abc/${path}`);
+    browser.tabs.query = jest.fn().mockResolvedValue([]);
+    browser.tabs.create = jest.fn().mockResolvedValue({ id: 42 });
+    const closeSpy = jest.spyOn(window, 'close').mockImplementation(() => {});
+
+    let container;
+    await act(async () => {
+      ({ container } = render(
+        <Provider>
+          <CollectionListOptions addCollection={jest.fn()} />
+        </Provider>,
+      ));
+    });
+
+    const fileInput = container.querySelector('input[type="file"]');
+    const clickSpy = jest.spyOn(fileInput, 'click');
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /import collections from file/i }));
+    });
+
+    // The picker is NOT opened; the explanatory modal is.
+    expect(clickSpy).not.toHaveBeenCalled();
+    expect(await screen.findByText(/only possible from the/i)).toBeInTheDocument();
+
+    // "Open Full Page" hands the import off to the full-page view.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /open full page/i }));
+    });
+    expect(browser.storage.local.set).toHaveBeenCalledWith(
+      expect.objectContaining({ pendingImportRequest: expect.any(Number) }),
+    );
+    expect(browser.tabs.create).toHaveBeenCalledWith({
+      url: browser.runtime.getURL('fullpage.html'),
+    });
+    closeSpy.mockRestore();
+  });
+
+  test('shows the full-page modal on Firefox regardless of OS (issue #68)', async () => {
+    browser.runtime.getPlatformInfo = jest.fn().mockResolvedValue({ os: 'mac' });
+    browser.runtime.getURL = jest.fn((path = '') => `moz-extension://abc/${path}`);
+
+    await act(async () => {
+      render(
+        <Provider>
+          <CollectionListOptions addCollection={jest.fn()} />
+        </Provider>,
+      );
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /import collections from file/i }));
+    });
+
+    expect(await screen.findByText(/only possible from the/i)).toBeInTheDocument();
+    expect(browser.runtime.getPlatformInfo).not.toHaveBeenCalled(); // moz-extension short-circuits
+  });
+
+  test('keeps the in-popup file picker on non-Linux Chromium (issue #68)', async () => {
+    browser.runtime.getPlatformInfo = jest.fn().mockResolvedValue({ os: 'mac' });
+    browser.runtime.getURL = jest.fn((path = '') => `chrome-extension://abc/${path}`);
+
+    let container;
+    await act(async () => {
+      ({ container } = render(
+        <Provider>
+          <CollectionListOptions addCollection={jest.fn()} />
+        </Provider>,
+      ));
+    });
+
+    const fileInput = container.querySelector('input[type="file"]');
+    const clickSpy = jest.spyOn(fileInput, 'click');
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /import collections from file/i }));
+    });
+
+    expect(clickSpy).toHaveBeenCalled();
+    expect(screen.queryByText(/only possible from the/i)).not.toBeInTheDocument();
+  });
+
   test('renders the AI button in the toolbar when Tabox AI is enabled', async () => {
     browser.storage.local.get.mockResolvedValue({ chkTaboxAI: true });
 

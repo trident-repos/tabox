@@ -786,6 +786,23 @@ function FPContentArea({
         return () => { isMountedRef.current = false; };
     }, []);
 
+    // Issue #68: on Firefox/Linux the popup can't run the file picker (the OS
+    // dialog destroys the popup document), so its Import routes here with a
+    // pendingImportRequest flag. Consume it once and open the picker — where the
+    // platform blocks non-gesture pickers the user just clicks Import here.
+    useEffect(() => {
+        const consumePendingImport = async () => {
+            const { pendingImportRequest } = await browser.storage.local.get('pendingImportRequest');
+            if (!pendingImportRequest) return;
+            await browser.storage.local.remove('pendingImportRequest');
+            // Only honor recent requests so a stale flag can't pop a picker later.
+            if (Date.now() - pendingImportRequest < 30000) {
+                fileInputRef.current?.click();
+            }
+        };
+        consumePendingImport();
+    }, []);
+
     // Command palette integration: listen for custom events to open modals/file picker
     useEffect(() => {
         const openFolder = () => setFolderModalOpen(true);
