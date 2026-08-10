@@ -786,22 +786,6 @@ function FPContentArea({
         return () => { isMountedRef.current = false; };
     }, []);
 
-    // Issue #68: the popup routes Import here (a real tab survives the OS file
-    // dialog; the popup document does not on Edge/Linux Chromium). Consume the
-    // pending request once, then open the file picker.
-    useEffect(() => {
-        const consumePendingImport = async () => {
-            const { pendingImportRequest } = await browser.storage.local.get('pendingImportRequest');
-            if (!pendingImportRequest) return;
-            await browser.storage.local.remove('pendingImportRequest');
-            // Only honor recent requests so a stale flag can't pop a picker later.
-            if (Date.now() - pendingImportRequest < 30000) {
-                fileInputRef.current?.click();
-            }
-        };
-        consumePendingImport();
-    }, []);
-
     // Command palette integration: listen for custom events to open modals/file picker
     useEffect(() => {
         const openFolder = () => setFolderModalOpen(true);

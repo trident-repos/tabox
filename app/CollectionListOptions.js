@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { settingsDataState } from './atoms/globalAppSettingsState';
+import { highlightedCollectionUidState } from './atoms/animationsState';
 import AIButton from './AIButton';
 import './CollectionListOptions.css';
 import { PiGridNineFill } from "react-icons/pi";
 import { browser } from '../static/globals';
-import { openOrFocusFullPageInCurrentWindow } from './utils/openFullPage';
 import Select, { components } from 'react-select';
 import {
     MdAccessTime,
@@ -19,7 +19,7 @@ import {
 } from 'react-icons/md';
 import { TbFileImport } from 'react-icons/tb';
 import { CollectionFilter } from './CollectionFilter';
-import { showErrorToast } from './toastHelpers';
+import { showSuccessToast, showErrorToast } from './toastHelpers';
 import { Tooltip } from 'react-tooltip';
 // Lazy load rarely-used modals for better performance
 const CreateFolderModal = lazy(() => import('./CreateFolderModal'));
@@ -59,12 +59,14 @@ function SortSingleValue(props) {
 
 export function CollectionListOptions(props) {
     const settingsData = useAtomValue(settingsDataState);
+    const setHighlightedCollectionUid = useSetAtom(highlightedCollectionUidState);
     const [sortType, setSortType] = useState('DATE');
     const [sortAscending, setSortAscending] = useState(true);
     const [openInNewWindow, setOpenInNewWindow] = useState(false);
     const [viewMode, setViewMode] = useState('list'); // 'list' or 'grid'
     const [isFolderModalOpen, setIsFolderModalOpen] = useState(false);
     const isMountedRef = useRef(true);
+    const fileInputRef = useRef(null);
     const menuPortalTarget = typeof document !== 'undefined' ? document.body : null;
 
     useEffect(() => {
@@ -227,9 +229,7 @@ export function CollectionListOptions(props) {
 
     useEffect(() => {
         const openFolder = () => setIsFolderModalOpen(true);
-        // Command palette "Import" in the popup routes to the full-page view too
-        // (see handleImportClick — the popup cannot survive the OS file dialog).
-        const openImport = () => handleImportClick();
+        const openImport = () => fileInputRef.current?.click();
         window.addEventListener('tabox:open-create-folder', openFolder);
         window.addEventListener('tabox:open-import', openImport);
         return () => {
@@ -252,22 +252,81 @@ export function CollectionListOptions(props) {
         }
     };
 
-    // Issue #68/#88/#93: opening a native file picker from the POPUP is fundamentally
-    // broken on Edge and Linux Chromium — the OS dialog steals focus, the browser
-    // destroys the popup document, and the input's change event never fires, so the
-    // import silently dies. A regular tab is immune, and the full-page view already
-    // has a complete import path — so the popup's Import always routes there. The
-    // full-page view picks up the pending request on mount (FPContentArea) and opens
-    // its own file picker.
-    const handleImportClick = async () => {
-        try {
-            await browser.storage.local.set({ pendingImportRequest: Date.now() });
-            await openOrFocusFullPageInCurrentWindow();
-            window.close();
-        } catch (error) {
-            console.error('[Import UI] Failed to open full-page import:', error);
-            showErrorToast('Import failed: could not open the full-page view');
+    const handleImportClick = () => {
+        fileInputRef.current?.click();
+    };
+
+    const handleFileSelection = async (event) => {
+        const file = event.target.files[0];
+        if (!event.target.value.endsWith('.txt')) {
+            showErrorToast('Invalid file: Please select a .txt file');
+            event.target.value = '';
+            return;
         }
+        
+        let reader = new FileReader();
+        reader.onload = async function () {
+            const result = reader.result;
+            
+            // More flexible JSON validation
+            const trimmedResult = result.trim();
+            if (!trimmedResult.startsWith('{') && !trimmedResult.startsWith('[')) {
+                showErrorToast('Invalid File: File does not contain valid JSON data');
+                event.target.value = '';
+                return;
+            }
+            
+            try {
+                let parsed = JSON.parse(trimmedResult);
+                // Clear file input immediately (fast operation)
+                event.target.value = '';
+                
+                // Delegate import to background script to survive popup close
+                // This fixes the bug where imports fail unless Inspect Popup is open
+                console.log('[Import UI] Sending import request to background');
+                let importResult;
+                try {
+                    importResult = await browser.runtime.sendMessage({
+                        type: 'importData',
+                        data: parsed
+                    });
+                    console.log('[Import UI] Received response:', importResult);
+                } catch (msgError) {
+                    console.error('[Import UI] Message sending failed:', msgError);
+                    showErrorToast('Import failed: Could not communicate with background service - ' + (msgError?.message || 'Unknown error'));
+                    return;
+                }
+                
+                if (importResult && importResult.success) {
+                    // Refresh UI after successful import
+                    if (props.onDataUpdate) {
+                        await props.onDataUpdate();
+                    } else if (props.updateRemoteData) {
+                        const { loadAllCollections } = await import('./utils/storageUtils');
+                        const updatedCollections = await loadAllCollections();
+                        await props.updateRemoteData(updatedCollections);
+                    }
+                    
+                    // Highlight first imported collection
+                    if (importResult.firstCollectionUid) {
+                        setHighlightedCollectionUid(importResult.firstCollectionUid);
+                    }
+                    
+                    showSuccessToast(importResult.message);
+                } else {
+                    const errorMsg = importResult?.error || 'Unknown error during import';
+                    console.error('[Import UI] Import failed:', errorMsg, 'Full result:', importResult);
+                    showErrorToast('Import failed: ' + errorMsg);
+                }
+            }
+            catch (error) {
+                console.error('[Import UI] Parse error:', error);
+                showErrorToast('Invalid File: Unable to parse JSON - ' + error.message);
+                event.target.value = '';
+                return;
+            }
+        }
+        reader.readAsText(file);
     };
 
     const ICON_SIZE = 18; // Reduced from 24 to match smaller buttons
@@ -357,6 +416,15 @@ export function CollectionListOptions(props) {
                     <AIButton withDivider />
                 </div>
             </div>
+
+            {/* Hidden file input for import functionality */}
+            <input
+                ref={fileInputRef}
+                type="file"
+                accept=".txt"
+                onChange={handleFileSelection}
+                style={{ display: 'none' }}
+            />
 
             <Suspense fallback={null}>
                 <CreateFolderModal

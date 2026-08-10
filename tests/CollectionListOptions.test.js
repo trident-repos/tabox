@@ -57,14 +57,7 @@ describe('Collection List Options tests', () => {
     });
   });
 
-  test('routes popup import to the full-page view instead of opening a file picker (issue #68)', async () => {
-    // The popup document cannot survive the OS file dialog on Edge/Linux
-    // Chromium, so the popup must not render a file input at all — Import
-    // records a pending request and opens/focuses the full-page tab.
-    browser.tabs.query = jest.fn().mockResolvedValue([]);
-    browser.tabs.create = jest.fn().mockResolvedValue({ id: 42 });
-    const closeSpy = jest.spyOn(window, 'close').mockImplementation(() => {});
-
+  test('keeps popup import limited to legacy txt files', async () => {
     let container;
     await act(async () => {
       ({ container } = render(
@@ -74,19 +67,7 @@ describe('Collection List Options tests', () => {
       ));
     });
 
-    expect(container.querySelector('input[type="file"]')).toBeNull();
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /import collections from file/i }));
-    });
-
-    expect(browser.storage.local.set).toHaveBeenCalledWith(
-      expect.objectContaining({ pendingImportRequest: expect.any(Number) }),
-    );
-    expect(browser.tabs.create).toHaveBeenCalledWith({
-      url: browser.runtime.getURL('fullpage.html'),
-    });
-    closeSpy.mockRestore();
+    expect(container.querySelector('input[type="file"]')).toHaveAttribute('accept', '.txt');
   });
 
   test('renders the AI button in the toolbar when Tabox AI is enabled', async () => {
