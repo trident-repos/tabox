@@ -1978,15 +1978,35 @@ async function syncData(token) {
         // Check for potential conflicts
         const timeDifference = Math.abs(serverTimestamp - localTimestamp);
         const isConflict = timeDifference < 60000; // Within 1 minute might be conflict
-        
+
+        // Issue #67: a device that has never completed a sync against this Drive file
+        // must not resolve sync by raw timestamp comparison. localTimestamp is stamped
+        // on every save even while logged out, so a fresh device with a few offline
+        // collections looks "newer" than the whole account and — outside the 60s
+        // conflict window — used to wholesale-overwrite the Drive file (wiping every
+        // other device on their next pull), or, in the other direction, plain-download
+        // and drop its local-only collections as stale keys. First sync always merges.
+        const { lastSuccessfulSyncTime } = await browser.storage.local.get('lastSuccessfulSyncTime');
+        const isFirstSyncOnThisDevice = !lastSuccessfulSyncTime;
+
         if (serverTimestamp > localTimestamp) {
-            logSyncOperation('info', 'Remote data is newer, updating local', { 
-                serverTimestamp, 
+            logSyncOperation('info', 'Remote data is newer, updating local', {
+                serverTimestamp,
                 localTimestamp,
-                isConflict 
+                isConflict,
+                isFirstSyncOnThisDevice
             });
-            
-            if (isConflict) {
+
+            // First sync with local data present: merge instead of a plain download,
+            // which would remove local-only collections as stale keys (issue #67).
+            let forceFirstSyncMerge = false;
+            if (!isConflict && isFirstSyncOnThisDevice) {
+                const localCollections = (await loadAllCollectionsBG(true)) || [];
+                const localFolders = (await loadAllFoldersBG()) || [];
+                forceFirstSyncMerge = (localCollections.length + localFolders.length) > 0;
+            }
+
+            if (isConflict || forceFirstSyncMerge) {
                 // Potential conflict - create additional backup
                 await createPreSyncBackup('conflict-before-remote-update');
 
@@ -2004,7 +2024,10 @@ async function syncData(token) {
                 localSyncData.timestamp = localTimestamp;
                 const mergedSyncData = mergeSyncSnapshots({
                     localSnapshot: localSyncData,
-                    remoteSnapshot: remoteSyncData
+                    remoteSnapshot: remoteSyncData,
+                    // A first sync can't have implicitly deleted remote entities it
+                    // has never seen — keep every remote-only entity (issue #67).
+                    disableImplicitLocalDeletions: isFirstSyncOnThisDevice
                 });
                 mergedSyncData.timestamp = Date.now();
 
@@ -2087,10 +2110,14 @@ async function syncData(token) {
                 localCollectionCount: nonSharedCollectionCount,
                 nonSharedFolderCount,
                 sharedCollectionCount,
-                isConflict
+                isConflict,
+                isFirstSyncOnThisDevice
             });
-            
-            if (isConflict) {
+
+            // First sync on this device: never wholesale-overwrite the account's Drive
+            // file based on the local timestamp alone — merge with the remote snapshot
+            // so other devices' collections survive (issue #67).
+            if (isConflict || isFirstSyncOnThisDevice) {
                 // Potential conflict - create additional backup
                 await createPreSyncBackup('conflict-before-local-update');
 
@@ -2108,7 +2135,10 @@ async function syncData(token) {
                 localSyncData.timestamp = localTimestamp;
                 const mergedSyncData = mergeSyncSnapshots({
                     localSnapshot: localSyncData,
-                    remoteSnapshot: remoteSyncData
+                    remoteSnapshot: remoteSyncData,
+                    // A first sync can't have implicitly deleted remote entities it
+                    // has never seen — keep every remote-only entity (issue #67).
+                    disableImplicitLocalDeletions: isFirstSyncOnThisDevice
                 });
                 mergedSyncData.timestamp = Date.now();
 

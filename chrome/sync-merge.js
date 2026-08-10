@@ -90,7 +90,8 @@ const resolveSingleSidedEntity = ({
     localEntity,
     remoteEntity,
     localSnapshotTimestamp,
-    remoteSnapshotTimestamp
+    remoteSnapshotTimestamp,
+    disableImplicitLocalDeletions
 }) => {
     if (localEntity && remoteEntity) {
         return chooseMergedEntity(localEntity, remoteEntity);
@@ -98,6 +99,12 @@ const resolveSingleSidedEntity = ({
 
     if (localEntity) {
         return localEntity;
+    }
+
+    // A device that has never synced against this snapshot cannot have implicitly
+    // deleted anything from it — every remote-only entity must survive (issue #67).
+    if (disableImplicitLocalDeletions) {
+        return remoteEntity;
     }
 
     const localDeletionLikely = (
@@ -150,7 +157,8 @@ const mergeEntityCollections = ({
     localEntities,
     remoteEntities,
     localSnapshotTimestamp,
-    remoteSnapshotTimestamp
+    remoteSnapshotTimestamp,
+    disableImplicitLocalDeletions
 }) => {
     const localEntityMap = new Map(localEntities.map((entity) => [entity.uid, entity]));
     const remoteEntityMap = new Map(remoteEntities.map((entity) => [entity.uid, entity]));
@@ -165,7 +173,8 @@ const mergeEntityCollections = ({
             localEntity: localEntityMap.get(uid),
             remoteEntity: remoteEntityMap.get(uid),
             localSnapshotTimestamp,
-            remoteSnapshotTimestamp
+            remoteSnapshotTimestamp,
+            disableImplicitLocalDeletions
         });
 
         if (mergedEntity) {
@@ -186,7 +195,7 @@ const normalizeOrphanedCollections = (collections, folders) => {
     ));
 }
 
-function mergeSyncSnapshots({ localSnapshot, remoteSnapshot, now = Date.now() }) {
+function mergeSyncSnapshots({ localSnapshot, remoteSnapshot, now = Date.now(), disableImplicitLocalDeletions = false }) {
     const normalizedLocalSnapshot = normalizeSyncSnapshot(localSnapshot, now);
     const normalizedRemoteSnapshot = normalizeSyncSnapshot(remoteSnapshot, now);
     const mergedDeletionTombstones = mergeDeletionTombstones(
@@ -203,7 +212,8 @@ function mergeSyncSnapshots({ localSnapshot, remoteSnapshot, now = Date.now() })
                 localEntities: normalizedLocalSnapshot.foldersArray,
                 remoteEntities: normalizedRemoteSnapshot.foldersArray,
                 localSnapshotTimestamp: normalizedLocalSnapshot.timestamp,
-                remoteSnapshotTimestamp: normalizedRemoteSnapshot.timestamp
+                remoteSnapshotTimestamp: normalizedRemoteSnapshot.timestamp,
+                disableImplicitLocalDeletions
             }
         ),
         mergedFolderDeletionTombstones
@@ -215,7 +225,8 @@ function mergeSyncSnapshots({ localSnapshot, remoteSnapshot, now = Date.now() })
                 localEntities: normalizedLocalSnapshot.tabsArray,
                 remoteEntities: normalizedRemoteSnapshot.tabsArray,
                 localSnapshotTimestamp: normalizedLocalSnapshot.timestamp,
-                remoteSnapshotTimestamp: normalizedRemoteSnapshot.timestamp
+                remoteSnapshotTimestamp: normalizedRemoteSnapshot.timestamp,
+                disableImplicitLocalDeletions
             }
         ), mergedDeletionTombstones),
         mergedFolders
