@@ -36,6 +36,12 @@ function FPCardBase({
 }) {
     const hasSearchMatches = !!search?.trim() && matchingTabs.length > 0;
 
+    // dnd-kit sets aria-disabled when sorting is disabled (bulk selection, search),
+    // but the card and its controls stay interactive — only the drag is off.
+    // Passing it through would mark every descendant control disabled for AT.
+    const cardDragAttributes = { ...dragAttributes };
+    delete cardDragAttributes['aria-disabled'];
+
     return (
         <div
             className={[
@@ -47,7 +53,7 @@ function FPCardBase({
             style={style}
             onClick={onClick}
             onContextMenu={onContextMenu}
-            {...dragAttributes}
+            {...cardDragAttributes}
             {...dragListeners}
             role="button"
             tabIndex={0}
