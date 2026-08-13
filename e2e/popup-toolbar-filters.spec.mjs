@@ -1,5 +1,5 @@
 import { test, expect } from 'crxbox';
-import { buildSeed } from './support/fixtures.mjs';
+import { buildSeed, seedStorage } from './support/fixtures.mjs';
 
 // Regression: activating a filter reveals the leading clear-button area, which
 // must not push the popup toolbar onto a second row (the toolbar wrapper is
@@ -29,7 +29,7 @@ test('popup toolbar stays on a single row when filters are active', async ({ ext
   seed['collection_col-a'].favoriteOrder = 0;
   seed.collections_index['col-a'].isFavorite = true;
   seed.collections_index['col-a'].favoriteOrder = 0;
-  await ext.storage.local.set(seed);
+  await seedStorage(ext, seed);
 
   const popup = await ext.popup.open();
   await expect(popup.locator('.collections-toolbar')).toBeVisible();

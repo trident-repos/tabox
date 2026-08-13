@@ -1,5 +1,5 @@
 import { test, expect } from 'crxbox';
-import { buildSeed } from './support/fixtures.mjs';
+import { buildSeed, seedStorage } from './support/fixtures.mjs';
 
 // Repro for GitHub issue #94: reopening a collection that contains a native tab
 // group creates a NEW identical group every time instead of reusing/updating the
@@ -69,7 +69,8 @@ async function openTabCount(ext, urls) {
 
 test('reopening a collection reuses the existing matching tab group instead of duplicating it', async ({ ext }) => {
   const { seed: data } = seed(ext, { chkIgnoreDuplicates: false });
-  await ext.storage.local.set(data);
+  // seedStorage, not a raw set: this spec also seeds chkOpenNewWindow:false (§21 race).
+  await seedStorage(ext, data);
 
   await openFromPopup(ext);
   await expect.poll(() => groupsNamed(ext, 'Work'), { timeout: 10000 }).toBe(1);
@@ -87,7 +88,7 @@ test('reopening a collection reuses the existing matching tab group instead of d
 
 test('duplicate-tab setting is honored on same-window opens (skip tabs already open)', async ({ ext }) => {
   const { seed: data, urls } = seed(ext, { chkIgnoreDuplicates: true });
-  await ext.storage.local.set(data);
+  await seedStorage(ext, data);
 
   await openFromPopup(ext);
   await expect.poll(() => openTabCount(ext, urls), { timeout: 10000 }).toBe(2);

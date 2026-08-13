@@ -1,5 +1,5 @@
 import { test, expect } from 'crxbox';
-import { buildSeed, openFullPage } from './support/fixtures.mjs';
+import { buildSeed, openFullPage, seedStorage } from './support/fixtures.mjs';
 
 // Full-page sidebar navigation filters the content area by folder (FPSidebar → FPContentArea).
 
@@ -14,7 +14,7 @@ const SEED = buildSeed({
 });
 
 test('selecting a folder shows only that folder\'s collections', async ({ ext, context }) => {
-  await ext.storage.local.set(SEED);
+  await seedStorage(ext, SEED);
   const page = await openFullPage(ext);
   await expect(page.locator('.fp-collection-card')).toHaveCount(4);
 
@@ -29,7 +29,7 @@ test('selecting a folder shows only that folder\'s collections', async ({ ext, c
 });
 
 test('selecting "Root Level" shows only collections with no folder', async ({ ext, context }) => {
-  await ext.storage.local.set(SEED);
+  await seedStorage(ext, SEED);
   const page = await openFullPage(ext);
 
   await page.locator('[data-sidebar-no-folder="true"]').click();

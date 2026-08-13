@@ -1,5 +1,5 @@
 import { test, expect } from 'crxbox';
-import { buildSeed } from './support/fixtures.mjs';
+import { buildSeed, seedStorage } from './support/fixtures.mjs';
 
 // Repro attempt for GitHub issue #90 (dup: #99): after opening a collection once,
 // clicking "open collection tabs" again does nothing — regardless of the
@@ -87,7 +87,9 @@ async function expectTabsOpen(ext, windowId, urls, label) {
 
 test('reopens a collection in the current window after its tabs were closed (auto-update OFF)', async ({ ext }) => {
   const { seed: data, urls } = seed(ext, { chkEnableAutoUpdate: false });
-  await ext.storage.local.set(data);
+  // seedStorage, not a raw set: a late setInitialOptions default can flip the seeded
+  // chkOpenNewWindow:false back to true, sending the open to a new window (§21 race).
+  await seedStorage(ext, data);
 
   const winId = await popupWindowId(ext);
 
@@ -103,7 +105,7 @@ test('reopens a collection in the current window after its tabs were closed (aut
 
 test('reopens a collection after its tabs were closed with auto-update ON (tracked window)', async ({ ext }) => {
   const { seed: data, urls } = seed(ext, { chkEnableAutoUpdate: true });
-  await ext.storage.local.set(data);
+  await seedStorage(ext, data);
 
   const winId = await popupWindowId(ext);
 

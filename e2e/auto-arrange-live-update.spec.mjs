@@ -1,5 +1,5 @@
 import { test, expect } from 'crxbox';
-import { buildSeed, openFullPage } from './support/fixtures.mjs';
+import { buildSeed, openFullPage, seedStorage } from './support/fixtures.mjs';
 
 // Auto-Arrange live-update regression: after the SW-side writes (createFoldersBG +
 // moveCollectionsToFoldersBG + updateFolderCountsBG) — and after an aiUndo — every
@@ -39,7 +39,7 @@ function stubModel(ext, folders) {
 }
 
 test('full page updates live after SW-side auto-arrange writes', async ({ ext }) => {
-  await ext.storage.local.set(buildSeed(SEED));
+  await seedStorage(ext, buildSeed(SEED));
   const page = await openFullPage(ext);
   await expect(page.locator('.fp-collection-card', { hasText: 'Alpha News' })).toBeVisible();
 
@@ -53,7 +53,7 @@ test('full page updates live after SW-side auto-arrange writes', async ({ ext })
 });
 
 test('popup updates live after SW-side auto-arrange writes', async ({ ext }) => {
-  await ext.storage.local.set(buildSeed(SEED));
+  await seedStorage(ext, buildSeed(SEED));
   const popup = await ext.popup.open();
   await expect(popup.getByText('Alpha News')).toBeVisible();
 
@@ -64,7 +64,7 @@ test('popup updates live after SW-side auto-arrange writes', async ({ ext }) => 
 });
 
 test('REAL auto-arrange run (stubbed model) updates the open full page', async ({ ext }) => {
-  await ext.storage.local.set(buildSeed(SEED));
+  await seedStorage(ext, buildSeed(SEED));
   const page = await openFullPage(ext);
   await expect(page.locator('.fp-collection-card', { hasText: 'Alpha News' })).toBeVisible();
 
@@ -82,7 +82,7 @@ test('REAL auto-arrange run (stubbed model) updates the open full page', async (
 });
 
 test('undo after a real run reverts the open full page without a reload', async ({ ext }) => {
-  await ext.storage.local.set(buildSeed(SEED));
+  await seedStorage(ext, buildSeed(SEED));
   const page = await openFullPage(ext);
   await expect(page.locator('.fp-collection-card', { hasText: 'Alpha News' })).toBeVisible();
 
@@ -114,7 +114,7 @@ test('REAL run never files into a shared folder even if the model asks for it', 
   const shared = { folderId: 'srv-1', role: 'owner', ownerEmail: 'me@example.com', members: [] };
   seed.folders_index.sf1.shared = shared;
   seed.folder_sf1.shared = shared;
-  await ext.storage.local.set(seed);
+  await seedStorage(ext, seed);
   const page = await openFullPage(ext);
   await expect(page.locator('.fp-collection-card', { hasText: 'Alpha News' })).toBeVisible();
 
@@ -129,7 +129,7 @@ test('REAL run never files into a shared folder even if the model asks for it', 
 });
 
 test('backgrounded full-page tab catches up after writes without a reload', async ({ ext, context }) => {
-  await ext.storage.local.set(buildSeed(SEED));
+  await seedStorage(ext, buildSeed(SEED));
   const page = await openFullPage(ext);
   await expect(page.locator('.fp-collection-card', { hasText: 'Alpha News' })).toBeVisible();
 

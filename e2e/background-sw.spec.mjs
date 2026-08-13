@@ -1,5 +1,6 @@
 import { test, expect } from 'crxbox';
 import { createRequire } from 'node:module';
+import { NO_ONBOARDING, seedStorage } from './support/fixtures.mjs';
 
 const require = createRequire(import.meta.url);
 const { version } = require('../chrome/manifest.json');
@@ -48,7 +49,7 @@ const AUTO_BACKUP = {
 
 test.describe('background / service worker helpers', () => {
   test('sendMessage round-trips through the SW (getBackupOptions)', async ({ ext }) => {
-    await ext.storage.local.set({ autoBackups: [AUTO_BACKUP] });
+    await seedStorage(ext, { autoBackups: [AUTO_BACKUP] });
 
     const res = await ext.background.sendMessage({ type: 'getBackupOptions' });
 
@@ -65,7 +66,7 @@ test.describe('background / service worker helpers', () => {
   });
 
   test('evaluate runs inside the SW context (manifest + chrome.storage)', async ({ ext }) => {
-    await ext.storage.local.set({ autoBackups: [AUTO_BACKUP] });
+    await seedStorage(ext, { autoBackups: [AUTO_BACKUP] });
 
     const manifestVersion = await ext.background.evaluate(() => chrome.runtime.getManifest().version);
     expect(manifestVersion).toBe(version);
@@ -79,7 +80,10 @@ test.describe('background / service worker helpers', () => {
   });
 
   test('a force-killed SW restarts on demand and still serves messages', async ({ ext }) => {
-    await ext.storage.local.set({ autoBackups: [AUTO_BACKUP] });
+    // seedStorage is safe here because the seed precedes the kill(); after a kill the
+    // __taboxInstallSettled global is gone and onInstalled won't re-fire — use raw
+    // ext.storage.local.set for any post-kill seeding.
+    await seedStorage(ext, { autoBackups: [AUTO_BACKUP] });
     await ext.background.waitForReady();
 
     await ext.background.kill();
@@ -91,7 +95,10 @@ test.describe('background / service worker helpers', () => {
   });
 
   test('collections written before a restart survive it (UI works after)', async ({ ext }) => {
-    await ext.storage.local.set({
+    await seedStorage(ext, {
+      // Suppress the fresh-install onboarding overlay (seedStorage waits out the SW's
+      // install-time writes, so the seed can't be overwritten — see fixtures.mjs).
+      ...NO_ONBOARDING,
       collections_index: { 'col-a': indexEntry('Alpha'), 'col-b': indexEntry('Beta') },
       'collection_col-a': collection('col-a', 'Alpha'),
       'collection_col-b': collection('col-b', 'Beta'),

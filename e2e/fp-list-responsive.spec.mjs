@@ -1,5 +1,5 @@
 import { test, expect } from 'crxbox';
-import { buildSeed, openFullPage, tab } from './support/fixtures.mjs';
+import { buildSeed, openFullPage, tab, seedStorage } from './support/fixtures.mjs';
 
 // List-view rows must keep collection names readable when the detail panel
 // (45vw) squeezes the content area on smaller screens: favicons and secondary
@@ -16,7 +16,7 @@ const SEED = buildSeed({
 });
 
 test('list rows keep the collection name visible when the detail panel opens on a narrow window', async ({ ext }) => {
-  await ext.storage.local.set({ ...SEED, fpViewMode: 'list' });
+  await seedStorage(ext, { ...SEED, fpViewMode: 'list' });
   const page = await openFullPage(ext);
   await page.setViewportSize({ width: 1100, height: 800 });
   await expect(page.locator('.fp-collection-card')).toHaveCount(2);

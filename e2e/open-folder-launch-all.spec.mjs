@@ -1,5 +1,5 @@
 import { test, expect } from 'crxbox';
-import { buildSeed } from './support/fixtures.mjs';
+import { buildSeed, seedStorage } from './support/fixtures.mjs';
 
 // Coverage gap: opening collections into REAL new windows (post-refactor path where the
 // popup sends `createWindowSpec` and the BACKGROUND creates the window + tabs atomically —
@@ -93,7 +93,7 @@ test('opens a single collection into a new window from the popup', async ({ ext 
     { title: 'Alpha One', url: firstTabUrl(ext, 'alpha') },
     { title: 'Alpha Two', url: pageUrl('Alpha Two') },
   ];
-  await ext.storage.local.set({
+  await seedStorage(ext, {
     ...buildSeed({ collections: [{ uid: 'col-a', name: 'Alpha', tabs }] }),
     ...NO_ONBOARDING,
     chkOpenNewWindow: true,
@@ -138,7 +138,7 @@ test('opens all collections in a folder, each into its own new window', async ({
   // FolderContainer.js is disabled when collectionCount === 0, so reflect reality here.
   seed.folders_index['fold-1'].collectionCount = 2;
   seed['folder_fold-1'].collectionCount = 2;
-  await ext.storage.local.set({ ...seed, ...NO_ONBOARDING });
+  await seedStorage(ext, { ...seed, ...NO_ONBOARDING });
 
   const popup = await ext.popup.open();
   const baseline = await windowsSnapshot(ext);
@@ -167,7 +167,7 @@ test('auto-update syncs a live tab change in a tracked window back to storage', 
   // trackOpenedWindow (the default) registers its window for tracking; a 2s-debounced
   // listener then re-syncs the collection's saved tabs whenever that window's tabs change.
   const initialTabs = [{ title: 'Tracked One', url: firstTabUrl(ext, 'tracked') }];
-  await ext.storage.local.set({
+  await seedStorage(ext, {
     ...buildSeed({ collections: [{ uid: 'col-u', name: 'Tracked', tabs: initialTabs }] }),
     ...NO_ONBOARDING,
     chkOpenNewWindow: true,

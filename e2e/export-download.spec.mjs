@@ -1,9 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { test, expect } from 'crxbox';
+import { NO_ONBOARDING, seedStorage } from './support/fixtures.mjs';
 
 // E2E: exporting collections triggers a real browser download (anchor + Blob).
 // Exercises Playwright's download capture against the extension popup:
-//   - "Export all collections & folders" (Settings) → full_export JSON
+//   - Settings modal → "Export All Collections" section → full_export JSON
 //   - per-row "Export Collection" → single-collection JSON
 
 const T = 1_710_000_000_000;
@@ -33,6 +34,7 @@ const indexEntry = (name) => ({
 });
 
 const SEED = {
+  ...NO_ONBOARDING,
   collections_index: { 'col-a': indexEntry('Alpha'), 'col-b': indexEntry('Beta') },
   'collection_col-a': collection('col-a', 'Alpha'),
   'collection_col-b': collection('col-b', 'Beta'),
@@ -44,12 +46,13 @@ async function readDownloadJson(download) {
 }
 
 test('exports all collections as a JSON download', async ({ ext }) => {
-  await ext.storage.local.set(SEED);
+  await seedStorage(ext, SEED);
   const popup = await ext.popup.open();
 
-  // Open Settings → Backup & Restore (expanded by default).
+  // Open Settings modal → "Export All Collections" section.
   await popup.locator('.settings-button').click();
-  await expect(popup.locator('.custom-drawer.open')).toBeVisible();
+  await expect(popup.locator('.fp-settings-modal')).toBeVisible();
+  await popup.locator('.fp-settings-sidebar-item', { hasText: 'Export All Collections' }).click();
 
   const downloadPromise = popup.waitForEvent('download');
   await popup.getByRole('button', { name: 'Export all collections & folders' }).click();
@@ -64,7 +67,7 @@ test('exports all collections as a JSON download', async ({ ext }) => {
 });
 
 test('exports a single collection from its row menu', async ({ ext }) => {
-  await ext.storage.local.set(SEED);
+  await seedStorage(ext, SEED);
   const popup = await ext.popup.open();
 
   const row = popup.locator('[data-collection-uid="col-a"]');

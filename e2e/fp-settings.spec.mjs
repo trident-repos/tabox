@@ -1,5 +1,5 @@
 import { test, expect } from 'crxbox';
-import { buildSeed, openFullPage } from './support/fixtures.mjs';
+import { buildSeed, openFullPage, seedStorage } from './support/fixtures.mjs';
 
 // Full-page settings modal (SettingsMenu variant="fullpage"): toggle General switches and
 // verify each persists to its storage key. Switches are <input id> + <label htmlFor>; the
@@ -12,7 +12,7 @@ async function openSettings(page) {
 }
 
 test('Dark Mode toggle persists theme + darkModeToggle and sets the theme attribute', async ({ ext, context }) => {
-  await ext.storage.local.set(buildSeed({ collections: [{ uid: 'col-a', name: 'Alpha' }] }));
+  await seedStorage(ext, buildSeed({ collections: [{ uid: 'col-a', name: 'Alpha' }] }));
   const page = await openFullPage(ext);
   await openSettings(page);
 
@@ -30,7 +30,7 @@ test('Dark Mode toggle persists theme + darkModeToggle and sets the theme attrib
 });
 
 test('Tab counter badge toggle persists chkShowBadge', async ({ ext, context }) => {
-  await ext.storage.local.set(buildSeed({ collections: [{ uid: 'col-a', name: 'Alpha' }] }));
+  await seedStorage(ext, buildSeed({ collections: [{ uid: 'col-a', name: 'Alpha' }] }));
   const page = await openFullPage(ext);
   await openSettings(page);
 

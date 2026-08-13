@@ -1,5 +1,5 @@
 import { test, expect } from 'crxbox';
-import { buildSeed, openFullPage } from './support/fixtures.mjs';
+import { buildSeed, openFullPage, seedStorage } from './support/fixtures.mjs';
 
 // Regression: the Favorites sidebar view must render its cards with the exact
 // same grid layout as All Collections. It once wrapped cards in its own
@@ -34,7 +34,7 @@ async function cardMetrics(page) {
 }
 
 test('favorites view uses the same card grid as All Collections', async ({ ext }) => {
-  await ext.storage.local.set(favoritesSeed());
+  await seedStorage(ext, favoritesSeed());
   const page = await openFullPage(ext);
   await page.setViewportSize({ width: 1400, height: 900 });
   await expect(page.locator('.fp-collection-card')).toHaveCount(3);
@@ -56,7 +56,7 @@ test('favorites view uses the same card grid as All Collections', async ({ ext }
 });
 
 test('favorites view shows the empty hint when nothing is starred', async ({ ext }) => {
-  await ext.storage.local.set(buildSeed({ collections: [{ uid: 'col-a', name: 'Alpha', order: 0 }] }));
+  await seedStorage(ext, buildSeed({ collections: [{ uid: 'col-a', name: 'Alpha', order: 0 }] }));
   const page = await openFullPage(ext);
   await page.locator('.fp-sidebar-nav-item', { hasText: 'Favorites' }).click();
   await expect(page.locator('.fp-favorites-empty-hint')).toHaveText('Star a collection to pin it here');
