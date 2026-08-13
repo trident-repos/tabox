@@ -130,7 +130,7 @@ module.exports = (env = {}, argv) => {
     plugins: [
       new webpack.DefinePlugin({ global: "globalThis" }),
       new HtmlWebpackPlugin({
-        title: "Tabox - Save and Share Tab Groups",
+        title: "Tabox - Tab Manager, Save & Share Tab Groups",
         meta: {
           charset: "utf-8",
           viewport: "width=device-width, initial-scale=1, shrink-to-fit=no",

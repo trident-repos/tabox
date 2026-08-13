@@ -14,7 +14,7 @@
     "48": "icons/icon48.png"
   },
   "manifest_version": 3,
-  "name": "Tabox - Save and Share Tab Groups",
+  "name": "Tabox - Tab Manager, Save & Share Tab Groups",
   "minimum_chrome_version": "89",
   "incognito": "spanning",
   "content_security_policy": {
