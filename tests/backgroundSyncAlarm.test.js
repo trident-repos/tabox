@@ -27,6 +27,9 @@ describe('background sync alarm', () => {
         global.isPushHealthy = jest.fn(async () => false);
         global.ensurePushSubscription = jest.fn(async () => true);
         global.teardownPushSubscription = jest.fn(async () => undefined);
+        // background-utils.js is loaded via importScripts too - the startup
+        // handlers await this before creating the sync alarm.
+        global.handleContextMenuCreation = jest.fn(async () => undefined);
     });
 
     afterEach(() => {
@@ -41,6 +44,7 @@ describe('background sync alarm', () => {
         delete global.isPushHealthy;
         delete global.ensurePushSubscription;
         delete global.teardownPushSubscription;
+        delete global.handleContextMenuCreation;
     });
 
     test('creates a recurring background sync alarm on startup when sync is enabled', async () => {

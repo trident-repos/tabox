@@ -821,74 +821,197 @@ function updateCollectionsUids(collections) {
     return tabsArray;
 }
 
-const createCollectionContextMenu = (collection) => {
-    browser.contextMenus.create({
-        title: collection.name,
+// ========================================
+// CONTEXT MENU (right click → "Add tab to Tabox Collection")
+// ========================================
+// The menu is rebuilt from a debounced storage.onChanged listener (see
+// handleMenuStorageChanged, registered in background.js). Storage is the
+// single choke point every mutation path goes through — popup CRUD, folder
+// ops, imports, Drive sync, shared-folder sync, share-link joins — so the
+// menu can never drift from what actually exists, unlike the old design that
+// relied on each path remembering to send an 'addCollection' message.
+
+// A group only renders in the submenu when at least one tab still references
+// it — orphaned groups linger in chromeGroups purely so undo can re-attach
+// tabs (same rule as app/utils/groupCount.js countNonEmptyGroups).
+const nonEmptyGroupsBG = (collection) => {
+    const groups = Array.isArray(collection?.chromeGroups) ? collection.chromeGroups : [];
+    if (groups.length === 0) return [];
+    const groupUidsWithTabs = new Set(
+        (collection.tabs || []).filter((tab) => tab && tab.groupUid).map((tab) => tab.groupUid)
+    );
+    return groups.filter((group) => group && groupUidsWithTabs.has(group.uid));
+};
+
+// Pure model builder: returns the ordered contextMenus.create() params for the
+// whole menu. Collections inside a read-only shared folder are excluded —
+// the menu is a write surface, and 'read' members must not see them.
+const buildContextMenuModel = (collections, folders) => {
+    const readOnlyFolderUids = new Set(
+        (folders || [])
+            .filter((folder) => folder?.shared?.folderId && folder.shared.role === 'read')
+            .map((folder) => folder.uid)
+    );
+    const visible = (collections || []).filter((collection) =>
+        collection && !readOnlyFolderUids.has(collection.parentId));
+    if (visible.length === 0) return [];
+
+    const model = [{
+        title: 'Add tab to Tabox Collection',
         contexts: ['all'],
-        parentId: 'tabox-super',
-        id: collection.chromeGroups?.length > 0 ? `${collection.uid}-main` : collection.uid,
-    });
-    if (collection.chromeGroups && collection.chromeGroups.length > 0) {
-        browser.contextMenus.create({
+        id: 'tabox-super',
+    }];
+    visible.forEach((collection) => {
+        const groups = nonEmptyGroupsBG(collection);
+        if (groups.length === 0) {
+            model.push({
+                title: collection.name,
+                contexts: ['all'],
+                parentId: 'tabox-super',
+                id: collection.uid,
+            });
+            return;
+        }
+        model.push({
+            title: collection.name,
+            contexts: ['all'],
+            parentId: 'tabox-super',
+            id: `${collection.uid}-main`,
+        });
+        model.push({
             title: 'Add tab to this collection',
             contexts: ['all'],
             parentId: `${collection.uid}-main`,
             id: collection.uid,
         });
-        browser.contextMenus.create({
+        model.push({
             parentId: `${collection.uid}-main`,
             id: `${collection.uid}-seperator`,
-            type: 'separator'
+            type: 'separator',
         });
-        browser.contextMenus.create({
+        model.push({
             title: 'Add tab to a group inside this collection',
             contexts: ['all'],
             enabled: false,
             parentId: `${collection.uid}-main`,
             id: `${collection.uid}-title`,
         });
-        collection.chromeGroups.forEach(cg => {
-            browser.contextMenus.create({
+        groups.forEach((cg) => {
+            model.push({
                 title: cg.title || '-',
                 contexts: ['all'],
                 parentId: `${collection.uid}-main`,
-                id: `${Math.random().toString(36).slice(2)}|${cg.uid}`,
+                // Deterministic id carrying both uids so the click handler can
+                // route without relying on parentMenuItemId.
+                id: `${collection.uid}|${cg.uid}`,
             });
-        })
-    }
-}
+        });
+    });
+    return model;
+};
 
-// Context menu throttling - update at most once every 5 seconds
+// Routes a clicked menu item id to its target. Structural ids (the super
+// item, submenu parents, separators, the disabled title row) resolve to null.
+const resolveContextMenuClick = (menuItemId) => {
+    if (typeof menuItemId !== 'string' || menuItemId === 'tabox-super') return null;
+    if (menuItemId.endsWith('-main') || menuItemId.endsWith('-title') || menuItemId.endsWith('-seperator')) return null;
+    if (menuItemId.includes('|')) {
+        const [collectionUid, groupUid] = menuItemId.split('|');
+        return { collectionUid, groupUid };
+    }
+    return { collectionUid: menuItemId, groupUid: null };
+};
+
+// Applies a context menu click: appends the tab to the target collection (or
+// into the clicked group). Returns { handled, isShared } so background.js can
+// decide which sync to nudge. Read-only shared folders are blocked here too
+// (defense in depth — their collections shouldn't be in the menu at all).
+const handleContextMenuClickBG = async (info, tab) => {
+    const target = resolveContextMenuClick(info?.menuItemId);
+    if (!target) return { handled: false };
+    const collection = await loadSingleCollectionBG(target.collectionUid);
+    if (!collection) return { handled: false };
+
+    const parentFolder = collection.parentId ? await loadSingleFolderBG(collection.parentId) : null;
+    const isShared = Boolean(parentFolder?.shared?.folderId);
+    if (parentFolder?.shared?.role === 'read') return { handled: false };
+
+    const tabToAdd = { ...tab };
+    collection.tabs = Array.isArray(collection.tabs) ? collection.tabs : [];
+    if (target.groupUid) {
+        const group = (collection.chromeGroups || []).find((cg) => cg.uid === target.groupUid);
+        if (!group) return { handled: false };
+        tabToAdd.groupId = group.id;
+        tabToAdd.groupUid = group.uid;
+        const indexInTabs = collection.tabs.findIndex((t) => t.groupUid === group.uid);
+        if (indexInTabs === -1) {
+            collection.tabs.push(tabToAdd);
+        } else {
+            collection.tabs.splice(indexInTabs, 0, tabToAdd);
+        }
+    } else {
+        collection.tabs.push(tabToAdd);
+    }
+
+    const saved = await saveSingleCollectionBG(collection, true);
+    return { handled: saved === true, isShared };
+};
+
+// Debounced rebuild. A fingerprint of the last-applied model skips redundant
+// removeAll/create cycles (auto-updated collections churn storage on every
+// tab event without changing the menu).
+const CONTEXT_MENU_DEBOUNCE_MS = 1500;
 let contextMenuTimeout = null;
-let pendingContextMenuUpdate = false;
+let lastContextMenuFingerprint = null;
+
+const rebuildContextMenuNow = async () => {
+    const [tabsArray, foldersArray] = await Promise.all([
+        loadAllCollectionsBG(true),
+        loadAllFoldersBG(),
+    ]);
+    const model = buildContextMenuModel(tabsArray, foldersArray);
+    const fingerprint = JSON.stringify(model);
+    if (fingerprint === lastContextMenuFingerprint) return;
+    await browser.contextMenus.removeAll();
+    model.forEach((item) => browser.contextMenus.create(item));
+    lastContextMenuFingerprint = fingerprint;
+    // Debug/e2e observability: what the menu was last built from.
+    if (typeof globalThis !== 'undefined') {
+        globalThis.__taboxContextMenu = {
+            rebuilds: (globalThis.__taboxContextMenu?.rebuilds || 0) + 1,
+            model,
+        };
+    }
+};
 
 const handleContextMenuCreation = async () => {
-    pendingContextMenuUpdate = true;
-    
     if (contextMenuTimeout) {
-        return; // Already scheduled
+        clearTimeout(contextMenuTimeout);
     }
-    
     contextMenuTimeout = setTimeout(async () => {
-        if (pendingContextMenuUpdate) {
-            await browser.contextMenus.removeAll();
-            // 🚀 NEW: Load from indexed storage
-            const tabsArray = await loadAllCollectionsBG(true);
-            if (tabsArray && tabsArray.length > 0) {
-                setTimeout(() => {
-                    browser.contextMenus.create({
-                        title: 'Add tab to Tabox Collection',
-                        contexts: ['all'],
-                        id: 'tabox-super'
-                    });
-                    tabsArray.forEach(collection => createCollectionContextMenu(collection));
-                }, 500);
-            }
-            pendingContextMenuUpdate = false;
-        }
         contextMenuTimeout = null;
-    }, 5000); // 5 seconds throttle
-}
+        try {
+            await rebuildContextMenuNow();
+        } catch (error) {
+            console.error('Context menu rebuild failed:', error);
+        }
+    }, CONTEXT_MENU_DEBOUNCE_MS);
+};
+
+// storage.onChanged listener: any write touching collections/folders (index
+// or individual records) schedules a rebuild. Note the '_' in the prefixes —
+// unrelated keys like 'collectionsToTrack' must not match.
+const handleMenuStorageChanged = (changes, areaName) => {
+    if (areaName !== 'local') return;
+    const relevant = Object.keys(changes).some((key) =>
+        key === STORAGE_KEYS.COLLECTIONS_INDEX ||
+        key === STORAGE_KEYS.FOLDERS_INDEX ||
+        key.startsWith(STORAGE_KEYS.COLLECTION_PREFIX) ||
+        key.startsWith(STORAGE_KEYS.FOLDER_PREFIX));
+    if (relevant) {
+        handleContextMenuCreation();
+    }
+};
 
 async function applyChromeGroupSettings(windowId, collection) {
     if (!collection.chromeGroups || !browser.tabs.group || !browser.tabGroups) {
@@ -2547,6 +2670,12 @@ const backgroundUtilsApi = {
     applySmartOrganizePlan,
     undoSmartOrganize,
     readWindowForAI,
+    CONTEXT_MENU_DEBOUNCE_MS,
+    buildContextMenuModel,
+    resolveContextMenuClick,
+    handleContextMenuClickBG,
+    handleContextMenuCreation,
+    handleMenuStorageChanged,
 };
 
 if (typeof globalThis !== 'undefined') {

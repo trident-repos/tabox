@@ -198,12 +198,16 @@ async function ensureSharedSyncAlarm() {
 function handlePushEvent(event) {
   event.waitUntil(syncSharedFolders());
 }
-self.addEventListener('push', handlePushEvent);
-self.addEventListener('pushsubscriptionchange', (event) => {
-  event.waitUntil(
-    ensurePushSubscription({ force: true }).then(() => ensureSharedSyncAlarm())
-  );
-});
+// `self` only exists in worker/window contexts — not in Node (Jest), where
+// requiring this module for unit tests would otherwise throw.
+if (typeof self !== 'undefined' && typeof self.addEventListener === 'function') {
+  self.addEventListener('push', handlePushEvent);
+  self.addEventListener('pushsubscriptionchange', (event) => {
+    event.waitUntil(
+      ensurePushSubscription({ force: true }).then(() => ensureSharedSyncAlarm())
+    );
+  });
+}
 
 // Perf: event-driven push for shared folders. Every local data change already
 // flows through the 'updateRemote' message (Drive path, below) — piggyback a
@@ -2632,31 +2636,30 @@ try {
   });
 
   const handleMenuClick = async (info, tab) => {
-    if (info.menuItemId === 'tabox-super') return;
-    let tabsArray = await loadAllCollectionsBG(true);
-    let tabToAdd = { ...tab };
-    const isClickOnTabGroup = info?.menuItemId?.includes('-main');
-    const collectionUid = isClickOnTabGroup ? info?.parentMenuItemId?.replace('-main', '') : info.menuItemId;
-    const collectionIndex = tabsArray.findIndex(c => c.uid === collectionUid);
-    if (collectionIndex === -1) return;
-    if (isClickOnTabGroup) {
-      const groupUid = info.menuItemId.split('|')[1];
-      const group = tabsArray[collectionIndex].chromeGroups?.find(cg => cg.uid === groupUid);
-      if (!group) return;
-      const indexInTabs = tabsArray[collectionIndex].tabs.findIndex(t => t.groupUid === group.uid);
-      tabToAdd.groupId = group.id;
-      tabToAdd.groupUid = group.uid;
-      tabsArray[collectionIndex]?.tabs?.splice(indexInTabs, 0, tabToAdd);
-    } else {
-      tabsArray[collectionIndex]?.tabs?.push(tabToAdd);
+    // Storage mutation + group/permission routing live in background-utils
+    // (handleContextMenuClickBG); this wrapper only picks the right sync.
+    const result = await handleContextMenuClickBG(info, tab);
+    if (!result?.handled) return;
+    if (result.isShared) {
+      // Shared-folder collections are owned by the Worker shared-sync engine,
+      // not Google Drive — nudge it instead of the Drive sync.
+      if (typeof syncSharedFolders === 'function') syncSharedFolders();
+      return;
     }
-
-    await saveSingleCollectionBG(tabsArray[collectionIndex], true);
     syncLegacyStorageThrottled();
     await handleRemoteUpdate();
   }
 
   browser.contextMenus.onClicked.addListener(handleMenuClick);
+
+  // Single choke point keeping the context menu in lockstep with storage:
+  // every mutation path (popup CRUD, folder ops, imports, Drive sync,
+  // shared-folder sync, share-link joins) writes these keys.
+  // Defined in background-utils.js (importScripts); absent in unit tests that
+  // load this file standalone.
+  if (typeof handleMenuStorageChanged === 'function') {
+    browser.storage.onChanged.addListener(handleMenuStorageChanged);
+  }
 
   const handleAutoBackupAlarm = async () => {
     const alarms = await browser.alarms.getAll();
@@ -2755,11 +2758,19 @@ try {
       console.error('Error during startup backup cleanup:', error);
     }
   }, 5000);
+
+  // Install-time storage writes are done past this point. E2E seeds wait on this
+  // marker so a late default (e.g. setInitialOptions' chkOpenNewWindow) can't land
+  // on top of a test's seeded values (see e2e/support/fixtures.mjs seedStorage).
+  globalThis.__taboxInstallSettled = true;
   })
 
   browser.runtime.onStartup.addListener(async () => {
     await setInitialOptions();
     await applyToolbarLaunchBehavior();
+    // Rebuild the context menu on every browser launch: menus persist across
+    // sessions, so any staleness would otherwise stick until the next mutation.
+    await handleContextMenuCreation();
     await handleAutoBackupAlarm();
     await ensureBackgroundSyncAlarm();
     await ensurePushSubscription();
