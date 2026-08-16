@@ -48,6 +48,7 @@ export const FPToast = ({
     title,
     message,
     undoAction,
+    actions,
     duration = 3000,
     visible,
 }) => {
@@ -79,6 +80,20 @@ export const FPToast = ({
                     {message && <div className="fp-toast-message">{message}</div>}
                 </div>
                 <div className="fp-toast-actions">
+                    {Array.isArray(actions) && actions.map((action) => (
+                        <button
+                            key={action.label}
+                            className="fp-toast-undo-btn"
+                            onClick={async () => {
+                                if (action.onClick) {
+                                    await action.onClick();
+                                }
+                                dismiss();
+                            }}
+                        >
+                            <span>{action.label}</span>
+                        </button>
+                    ))}
                     {variant === 'undo' && undoAction && (
                         <FPUndoButton
                             undoAction={undoAction}

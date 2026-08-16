@@ -11,6 +11,7 @@ import { getNextFavoriteOrder } from './utils/favoritesUtils';
 import { noPermissionOpenState } from './atoms/sharedFoldersState';
 import { canEditFolder, guardFolderEdit } from './utils/sharedFolderUtils';
 import { getDisplayInfo } from './utils/displayInfo';
+import { maybeShowFileAccessNotice } from './utils/fileAccessNotice';
 
 export const openCollectionTabs = async ({
     collectionToOpen,
@@ -130,6 +131,11 @@ export const openCollectionTabs = async ({
                 `${result.skippedForIncognito} tab(s) skipped - not allowed in incognito`,
                 4000
             );
+        }
+        if (result.skippedForFileAccess > 0) {
+            // Explains the "Allow access to file URLs" requirement; one-time
+            // dismissible via its "Don't show again" action.
+            await maybeShowFileAccessNotice(result.skippedForFileAccess);
         }
     }
 

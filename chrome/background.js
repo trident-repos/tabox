@@ -997,6 +997,26 @@ async function isIncognitoEnabled() {
   }
 }
 
+// Helper function to check if the user has enabled "Allow access to file URLs".
+// Chrome/Edge reject tabs.create() with a file:// URL unless the user flips that
+// switch in the extension's details page; Firefox never lets extensions open
+// file:// tabs, and its isAllowedFileSchemeAccess() always resolves false —
+// both engines funnel into the same "skip and explain" path.
+async function isFileSchemeAccessAllowed() {
+  try {
+    if (typeof browser.extension?.isAllowedFileSchemeAccess !== 'function') {
+      // API unavailable: attempt the open rather than silently withholding tabs.
+      return true;
+    }
+    return await browser.extension.isAllowedFileSchemeAccess();
+  } catch (error) {
+    console.warn('Could not check file scheme access:', error);
+    return true;
+  }
+}
+
+const isFileSchemeUrl = (url) => typeof url === 'string' && url.toLowerCase().startsWith('file://');
+
 // Creates the destination window for the new-window "open collection" path.
 // Moved here (from the popup) so the whole "create window -> open tabs" sequence
 // runs in the background: on Firefox, focusing a brand-new window destroys the
@@ -1079,7 +1099,15 @@ async function openTabs(collection, window, newWindow = null, trackOpenedWindow 
   // Pre-process all tabs to avoid repeated work
   const tabsToCreate = [];
   const skippedIncognitoTabs = [];
+  const skippedFileAccessTabs = [];
   const firstTabUpdate = isNewWindow(window);
+
+  // Only hit the isAllowedFileSchemeAccess API when the collection actually
+  // contains file:// tabs. Without the "Allow access to file URLs" permission,
+  // tabs.create() rejects file:// URLs — previously they just landed in
+  // tabsFailed with no explanation for the user.
+  const hasFileTabs = collection.tabs.some(t => isFileSchemeUrl(unwrapDeferredUrl(t.url)));
+  const fileAccessAllowed = hasFileTabs ? await isFileSchemeAccessAllowed() : true;
   
   for (let index = 0; index < totalTabs; index++) {
     const tabInGrp = collection.tabs[index];
@@ -1110,6 +1138,19 @@ async function openTabs(collection, window, newWindow = null, trackOpenedWindow 
       }
     }
 
+    // Skip file:// URLs when the user hasn't granted "Allow access to file URLs" —
+    // surfaced to the UI via skippedForFileAccess so it can explain how to enable it
+    // (mirrors the skippedIncognitoTabs pattern above; incognito skips win first so
+    // a file tab is never double-counted).
+    if (!fileAccessAllowed && isFileSchemeUrl(realUrl)) {
+      skippedFileAccessTabs.push({
+        url: realUrl,
+        title: tabInGrp.title,
+        reason: 'file-access-disabled'
+      });
+      continue;
+    }
+
     // Pre-calculate deferred URL
     // Note: Don't use deferred loading in incognito as extension pages may have issues
     const shouldDefer = !isIncognitoWindow && chkEnableTabDiscard && shouldDiscardTab({ ...tabInGrp, url: realUrl });
@@ -1138,8 +1179,12 @@ async function openTabs(collection, window, newWindow = null, trackOpenedWindow 
   
   // Log skipped tabs if any
   if (skippedIncognitoTabs.length > 0) {
-    console.warn(`Skipped ${skippedIncognitoTabs.length} tabs that cannot be opened in incognito:`, 
+    console.warn(`Skipped ${skippedIncognitoTabs.length} tabs that cannot be opened in incognito:`,
       skippedIncognitoTabs.map(t => t.url));
+  }
+  if (skippedFileAccessTabs.length > 0) {
+    console.warn(`Skipped ${skippedFileAccessTabs.length} file:// tabs - "Allow access to file URLs" is disabled:`,
+      skippedFileAccessTabs.map(t => t.url));
   }
   
   
@@ -1247,6 +1292,8 @@ async function openTabs(collection, window, newWindow = null, trackOpenedWindow 
     tabsOpened: successCount,
     tabsFailed: errorCount,
     skippedForIncognito: skippedIncognitoTabs.length,
+    skippedForFileAccess: skippedFileAccessTabs.length,
+    skippedFileAccessReason: skippedFileAccessTabs.length > 0 ? 'file-access-disabled' : null,
     wasFromIncognito: wasFromIncognito,
     restoredToIncognito: incognitoRestoreSuccess,
     incognitoAttempted: incognitoRestoreAttempted,
