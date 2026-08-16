@@ -9,7 +9,9 @@ const toastHelpers = require('../app/toastHelpers');
 const {
     maybeShowFileAccessNotice,
     getFileAccessNoticeMessage,
+    initFileAccessNoticeWatcher,
     FILE_ACCESS_NOTICE_DISMISSED_KEY,
+    FILE_ACCESS_NOTICE_PENDING_KEY,
 } = require('../app/utils/fileAccessNotice');
 
 // UI side of the file:// UX: when the background reports skippedForFileAccess
@@ -95,5 +97,116 @@ describe('maybeShowFileAccessNotice', () => {
         browser.runtime.getURL = jest.fn(() => 'chrome-extension://test-id/');
         expect(getFileAccessNoticeMessage(1)).toContain('1 local file tab skipped');
         expect(getFileAccessNoticeMessage(2)).toContain('2 local file tabs skipped');
+    });
+});
+
+// The background persists FILE_ACCESS_NOTICE_PENDING_KEY when it skips file://
+// tabs (the initiating popup is usually torn down by the focus shift before a
+// toast could render). The watcher — mounted by App.js in both views — is what
+// actually surfaces the notice.
+describe('initFileAccessNoticeWatcher', () => {
+    let cleanup;
+
+    const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+    const getChangeListener = () => {
+        const calls = browser.storage.onChanged.addListener.mock.calls;
+        return calls[calls.length - 1][0];
+    };
+
+    beforeEach(() => {
+        jest.clearAllMocks();
+        cleanup = null;
+        browser.storage.local.get.mockReset();
+        browser.storage.local.set.mockReset();
+        browser.storage.local.remove = browser.storage.local.remove || jest.fn();
+        browser.storage.local.remove.mockReset();
+        browser.storage.local.remove.mockResolvedValue(undefined);
+        browser.storage.local.set.mockResolvedValue(undefined);
+        browser.runtime.getURL = jest.fn(() => 'chrome-extension://test-id/');
+        browser.runtime.id = 'test-id';
+    });
+
+    afterEach(() => {
+        if (cleanup) cleanup();
+    });
+
+    test('shows and consumes a pending notice on mount', async () => {
+        browser.storage.local.get.mockResolvedValue({
+            [FILE_ACCESS_NOTICE_PENDING_KEY]: { count: 2, ts: 123 },
+        });
+
+        cleanup = initFileAccessNoticeWatcher({ isFullPage: false });
+        await flush();
+
+        expect(toastHelpers.showInfoToast).toHaveBeenCalledTimes(1);
+        expect(toastHelpers.showInfoToast.mock.calls[0][0]).toContain('2 local file tabs skipped');
+        expect(browser.storage.local.remove).toHaveBeenCalledWith(FILE_ACCESS_NOTICE_PENDING_KEY);
+    });
+
+    test('does nothing on mount when there is no pending notice', async () => {
+        browser.storage.local.get.mockResolvedValue({});
+
+        cleanup = initFileAccessNoticeWatcher({ isFullPage: false });
+        await flush();
+
+        expect(toastHelpers.showInfoToast).not.toHaveBeenCalled();
+        expect(browser.storage.local.remove).not.toHaveBeenCalled();
+    });
+
+    test('a live storage change shows AND consumes the notice in the full-page view', async () => {
+        browser.storage.local.get.mockResolvedValue({});
+        cleanup = initFileAccessNoticeWatcher({ isFullPage: true });
+        await flush();
+
+        browser.storage.local.get.mockResolvedValue({
+            [FILE_ACCESS_NOTICE_PENDING_KEY]: { count: 1, ts: 123 },
+        });
+        getChangeListener()({ [FILE_ACCESS_NOTICE_PENDING_KEY]: { newValue: { count: 1 } } }, 'local');
+        await flush();
+
+        expect(toastHelpers.showInfoToast).toHaveBeenCalledTimes(1);
+        expect(browser.storage.local.remove).toHaveBeenCalledWith(FILE_ACCESS_NOTICE_PENDING_KEY);
+    });
+
+    test('a live storage change in the popup shows the notice but leaves it pending (popup may be about to die)', async () => {
+        browser.storage.local.get.mockResolvedValue({});
+        cleanup = initFileAccessNoticeWatcher({ isFullPage: false });
+        await flush();
+
+        browser.storage.local.get.mockResolvedValue({
+            [FILE_ACCESS_NOTICE_PENDING_KEY]: { count: 1, ts: 123 },
+        });
+        getChangeListener()({ [FILE_ACCESS_NOTICE_PENDING_KEY]: { newValue: { count: 1 } } }, 'local');
+        await flush();
+
+        expect(toastHelpers.showInfoToast).toHaveBeenCalledTimes(1);
+        expect(browser.storage.local.remove).not.toHaveBeenCalled();
+    });
+
+    test('mount consumes the pending notice even when the user already dismissed the toast', async () => {
+        browser.storage.local.get.mockImplementation(async (key) => {
+            if (key === FILE_ACCESS_NOTICE_PENDING_KEY) {
+                return { [FILE_ACCESS_NOTICE_PENDING_KEY]: { count: 1, ts: 123 } };
+            }
+            return { [FILE_ACCESS_NOTICE_DISMISSED_KEY]: true };
+        });
+
+        cleanup = initFileAccessNoticeWatcher({ isFullPage: false });
+        await flush();
+
+        expect(toastHelpers.showInfoToast).not.toHaveBeenCalled();
+        expect(browser.storage.local.remove).toHaveBeenCalledWith(FILE_ACCESS_NOTICE_PENDING_KEY);
+    });
+
+    test('cleanup removes the storage listener', async () => {
+        browser.storage.local.get.mockResolvedValue({});
+        cleanup = initFileAccessNoticeWatcher({ isFullPage: true });
+        await flush();
+        const listener = getChangeListener();
+
+        cleanup();
+        cleanup = null;
+
+        expect(browser.storage.onChanged.removeListener).toHaveBeenCalledWith(listener);
     });
 });

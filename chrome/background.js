@@ -1185,6 +1185,23 @@ async function openTabs(collection, window, newWindow = null, trackOpenedWindow 
   if (skippedFileAccessTabs.length > 0) {
     console.warn(`Skipped ${skippedFileAccessTabs.length} file:// tabs - "Allow access to file URLs" is disabled:`,
       skippedFileAccessTabs.map(t => t.url));
+    // Persist a pending notice for the UI instead of relying on the caller's
+    // toast: opening a collection shifts focus to the opened tabs/window, which
+    // tears the popup down before any post-open toast can render. The popup /
+    // full-page view picks this up on mount (or live via storage.onChanged) and
+    // shows the explanation then — see app/utils/fileAccessNotice.js. Also the
+    // only channel for the context-menu and keyboard-command open paths, which
+    // have no UI at all. Gated by the user's "Don't show again" choice.
+    try {
+      const { fileAccessNoticeDismissed } = await browser.storage.local.get('fileAccessNoticeDismissed');
+      if (!fileAccessNoticeDismissed) {
+        await browser.storage.local.set({
+          fileAccessNoticePending: { count: skippedFileAccessTabs.length, ts: Date.now() }
+        });
+      }
+    } catch (noticeError) {
+      console.warn('Could not persist file-access notice:', noticeError);
+    }
   }
   
   

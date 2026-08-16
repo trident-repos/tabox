@@ -11,7 +11,6 @@ import { getNextFavoriteOrder } from './utils/favoritesUtils';
 import { noPermissionOpenState } from './atoms/sharedFoldersState';
 import { canEditFolder, guardFolderEdit } from './utils/sharedFolderUtils';
 import { getDisplayInfo } from './utils/displayInfo';
-import { maybeShowFileAccessNotice } from './utils/fileAccessNotice';
 
 export const openCollectionTabs = async ({
     collectionToOpen,
@@ -132,11 +131,12 @@ export const openCollectionTabs = async ({
                 4000
             );
         }
-        if (result.skippedForFileAccess > 0) {
-            // Explains the "Allow access to file URLs" requirement; one-time
-            // dismissible via its "Don't show again" action.
-            await maybeShowFileAccessNotice(result.skippedForFileAccess);
-        }
+        // skippedForFileAccess is intentionally NOT toasted here: opening the
+        // collection shifts focus to the opened tabs/window, tearing this popup
+        // down before a toast could render. The background persists
+        // fileAccessNoticePending instead, and App.js's
+        // initFileAccessNoticeWatcher surfaces it in whichever view can
+        // actually display it (live in full-page, next open for the popup).
     }
 
     // `lastOpened` is intentionally NOT stamped here anymore. The background

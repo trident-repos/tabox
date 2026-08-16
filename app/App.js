@@ -56,6 +56,7 @@ import {
 import { applyFolderCollapsedState, getFolderCollapseStorageKey } from './utils/folderViewState';
 import { openOrFocusFullPageInCurrentWindow } from './utils/openFullPage';
 import { openCollectionTabs } from './useCollectionOperations';
+import { initFileAccessNoticeWatcher } from './utils/fileAccessNotice';
 
 // Folder operations
 import { createFolder } from './utils/folderOperations';
@@ -1842,6 +1843,13 @@ function App({ mode = 'popup' }) {
       browser.runtime.onMessage.removeListener(handleRuntimeMessage);
     };
   }, [applyCollectionUpdates]);
+
+  // file:// tabs skipped on open: the background persists a pending notice
+  // (fileAccessNoticePending) because the popup is torn down the moment the
+  // opened tabs take focus — a directly-shown toast dies unseen. The watcher
+  // shows it on mount (reopened popup, context-menu/keyboard opens) and live
+  // via storage.onChanged (persistent full-page view). Returns its own cleanup.
+  useEffect(() => initFileAccessNoticeWatcher({ isFullPage }), [isFullPage]);
 
   // Shared folders: keep pendingInvitesState (the invite banner) in sync with
   // storage — load it once on mount, then follow storage.onChanged so an

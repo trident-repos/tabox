@@ -90,6 +90,28 @@ describe('background openTabs file:// access detection', () => {
         ].filter(Boolean);
         expect(attemptedUrls.some((url) => url.toLowerCase().startsWith('file://'))).toBe(false);
         expect(attemptedUrls).toContain('https://example.com');
+
+        // The popup is usually dead by the time the result lands (focus shifted
+        // to the opened tabs), so the background must also persist a pending
+        // notice for the next live view to pick up.
+        expect(browser.storage.local._data.fileAccessNoticePending).toEqual(
+            expect.objectContaining({ count: 2 })
+        );
+    });
+
+    test('does not persist the pending notice when the user dismissed it, but still skips the tabs', async () => {
+        browser.extension.isAllowedFileSchemeAccess.mockResolvedValue(false);
+        await browser.storage.local.set({ fileAccessNoticeDismissed: true });
+
+        const seeded = await seedCollection('collection-file-dismissed', [
+            { url: 'file:///Users/me/notes.html', title: 'Notes' },
+            { url: 'https://example.com', title: 'Example' }
+        ]);
+
+        const result = await openInPrecreatedWindow(seeded);
+
+        expect(result.skippedForFileAccess).toBe(1);
+        expect(browser.storage.local._data.fileAccessNoticePending).toBeUndefined();
     });
 
     test('opens file:// tabs normally and reports zero skips when access is allowed', async () => {
@@ -104,6 +126,7 @@ describe('background openTabs file:// access detection', () => {
 
         expect(result.skippedForFileAccess).toBe(0);
         expect(result.skippedFileAccessReason).toBeNull();
+        expect(browser.storage.local._data.fileAccessNoticePending).toBeUndefined();
         const attemptedUrls = [
             ...browser.tabs.create.mock.calls.map(([props]) => props.url),
             ...browser.tabs.update.mock.calls.map(([, props]) => props?.url)
