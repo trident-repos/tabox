@@ -1,5 +1,5 @@
 import { test, expect } from 'crxbox';
-import { openFullPage } from './support/fixtures.mjs';
+import { NO_ONBOARDING, openFullPage, seedStorage } from './support/fixtures.mjs';
 
 // Quick tab switcher: Ctrl/Cmd+Shift+S palette listing all open tabs.
 // The in-app listener accepts ctrlKey OR metaKey, so Control+Shift+S works on every OS.
@@ -22,6 +22,10 @@ const activeTabUrl = async (ext, windowId) => {
 };
 
 test.describe('quick tab switcher', () => {
+  test.beforeEach(async ({ ext }) => {
+    await seedStorage(ext, NO_ONBOARDING);
+  });
+
   test('Ctrl+Shift+S opens the switcher in the popup and lists tabs from other windows', async ({ ext }) => {
     await ext.windows.create({ tabs: [pageUrl('Alpha Page'), pageUrl('Beta Page')] });
     const popup = await ext.popup.open();

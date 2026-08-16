@@ -44,7 +44,7 @@ function WelcomeScene({ active }) {
                 <div className="welcome-tabox-header"><strong>Tabox</strong><span>Collections</span></div>
                 <div className="welcome-tabox-search"><MdSearch /></div>
             </div>
-            <div className="welcome-scene-intro">Welcome</div>
+            <div className="welcome-scene-intro"><span>Welcome</span></div>
         </div>
     );
 }
@@ -216,12 +216,18 @@ export default function OnboardingGuide({ mode = 'popup' }) {
         FORCE_ONBOARDING_FOR_POPUP_TESTING && mode === 'popup'
     );
     const [step, setStep] = useState(0);
-    const [sceneRun, setSceneRun] = useState(0);
+    // Per-scene run counters: only the scene BECOMING active gets a new key
+    // (remount restarts its animation). The outgoing scene must keep its DOM
+    // node AND its is-active class — losing either strips its animations and
+    // visibly snaps it back to frame zero mid-slide. Scene 0 starts at run 1
+    // because it is active from the first render.
+    const [sceneRuns, setSceneRuns] = useState(() => STEPS.map((_, index) => (index === 0 ? 1 : 0)));
     const startProCheckout = useProCheckout();
 
     const goToStep = useCallback((nextStep) => {
-        setStep(Math.max(0, Math.min(STEPS.length - 1, nextStep)));
-        setSceneRun((current) => current + 1);
+        const clamped = Math.max(0, Math.min(STEPS.length - 1, nextStep));
+        setStep(clamped);
+        setSceneRuns((runs) => runs.map((run, index) => (index === clamped ? run + 1 : run)));
     }, []);
 
     useEffect(() => {
@@ -243,7 +249,7 @@ export default function OnboardingGuide({ mode = 'popup' }) {
     useEffect(() => {
         const handleShowRequest = () => {
             setStep(0);
-            setSceneRun((current) => current + 1);
+            setSceneRuns((runs) => runs.map((run, index) => (index === 0 ? run + 1 : run)));
             setIsOpen(true);
         };
         window.addEventListener(SHOW_ONBOARDING_EVENT, handleShowRequest);
@@ -281,9 +287,12 @@ export default function OnboardingGuide({ mode = 'popup' }) {
                     <div className="onboarding-scene-frame">
                         <div className="onboarding-scene-track" style={{ transform: `translate3d(-${step * 100}%, 0, 0)` }}>
                             {STEPS.map(({ Scene }, index) => (
+                                /* active = "this scene's animation timeline applies": true for
+                                   every scene that has played, so departed scenes hold their
+                                   end state (fill-mode: both) instead of resetting mid-slide. */
                                 <Scene
-                                    active={index === step}
-                                    key={index === step ? `${index}-${sceneRun}` : `${index}-idle`}
+                                    active={index === step || sceneRuns[index] > 0}
+                                    key={`${index}-${sceneRuns[index]}`}
                                 />
                             ))}
                         </div>

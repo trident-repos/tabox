@@ -1,32 +1,39 @@
 /* eslint-disable no-undef */
-try {
-  importScripts('browser-polyfill.min.js');
-  importScripts('sync-session-state.js');
-  importScripts('sync-transport.js');
-  importScripts('sync-merge.js');
-  importScripts('sync-apply.js');
-  importScripts('sync-throttle.js');
-  importScripts('pro-config.js');
-  importScripts('background-utils.js');
-  importScripts('push-client.js');
-  importScripts('pro-entitlement.js');
-  importScripts('shared-folders.js');
-  importScripts('ai-client.js');
-  importScripts('ai-planners.js');
-  importScripts('ai-storage.js');
-  importScripts('ai-registry.js');
-  importScripts('ai-engine.js');
-  importScripts('ai-task-auto-rename.js');
-  importScripts('ai-task-auto-arrange.js');
-  importScripts('ai-task-smart-organize.js');
-  importScripts('duplicate-detect.js');
-  importScripts('duplicate-sweep.js');
-  importScripts('ai-task-duplicate-sweep.js');
-  importScripts('split-collection.js');
-  importScripts('ai-task-split-collection.js');
-}
-catch (e) {
-  console.error(e);
+// Chrome MV3 loads background.js as a service worker and pulls in modules via
+// importScripts. Firefox MV3 runs an event page instead: the same files are
+// pre-loaded in order by manifest background.scripts (see chrome/buildManifest.js
+// BACKGROUND_SCRIPTS — parity enforced by tests/buildManifest.test.js), so
+// importScripts doesn't exist there and this block must not run.
+if (typeof importScripts === 'function') {
+  try {
+    importScripts('browser-polyfill.min.js');
+    importScripts('sync-session-state.js');
+    importScripts('sync-transport.js');
+    importScripts('sync-merge.js');
+    importScripts('sync-apply.js');
+    importScripts('sync-throttle.js');
+    importScripts('pro-config.js');
+    importScripts('background-utils.js');
+    importScripts('push-client.js');
+    importScripts('pro-entitlement.js');
+    importScripts('shared-folders.js');
+    importScripts('ai-client.js');
+    importScripts('ai-planners.js');
+    importScripts('ai-storage.js');
+    importScripts('ai-registry.js');
+    importScripts('ai-engine.js');
+    importScripts('ai-task-auto-rename.js');
+    importScripts('ai-task-auto-arrange.js');
+    importScripts('ai-task-smart-organize.js');
+    importScripts('duplicate-detect.js');
+    importScripts('duplicate-sweep.js');
+    importScripts('ai-task-duplicate-sweep.js');
+    importScripts('split-collection.js');
+    importScripts('ai-task-split-collection.js');
+  }
+  catch (e) {
+    console.error(e);
+  }
 }
   const syncSessionStateApi = typeof require === 'function'
     ? require('./sync-session-state.js')
@@ -191,12 +198,16 @@ async function ensureSharedSyncAlarm() {
 function handlePushEvent(event) {
   event.waitUntil(syncSharedFolders());
 }
-self.addEventListener('push', handlePushEvent);
-self.addEventListener('pushsubscriptionchange', (event) => {
-  event.waitUntil(
-    ensurePushSubscription({ force: true }).then(() => ensureSharedSyncAlarm())
-  );
-});
+// `self` only exists in worker/window contexts — not in Node (Jest), where
+// requiring this module for unit tests would otherwise throw.
+if (typeof self !== 'undefined' && typeof self.addEventListener === 'function') {
+  self.addEventListener('push', handlePushEvent);
+  self.addEventListener('pushsubscriptionchange', (event) => {
+    event.waitUntil(
+      ensurePushSubscription({ force: true }).then(() => ensureSharedSyncAlarm())
+    );
+  });
+}
 
 // Perf: event-driven push for shared folders. Every local data change already
 // flows through the 'updateRemote' message (Drive path, below) — piggyback a
@@ -921,7 +932,7 @@ const REALTIME_DOMAINS = new Set([
 ]);
 
 const IPV4_PATTERN = /\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b/;
-const SYSTEM_URL_PREFIXES = ['chrome-devtools://', 'chrome-extension://', 'chrome://', 'about:', 'file://'];
+const SYSTEM_URL_PREFIXES = ['chrome-devtools://', 'chrome-extension://', 'chrome://', 'about:', 'file://', 'moz-extension://'];
 
 function shouldDiscardTab(tab) {
   // Early return for basic exclusions - most performance-critical checks first
@@ -965,7 +976,14 @@ function shouldDiscardTab(tab) {
   return true;
 }
 
-const isNewWindow = window => window?.tabs?.length === 1 && (!window?.tabs[0].url || window?.tabs[0].url.indexOf('://newtab') > 0);
+// Exact-match new-tab URLs for browsers whose "://newtab" substring check
+// (Chrome's `chrome://newtab/`) doesn't apply. Firefox's fresh-window starter
+// tab is `about:home`/`about:newtab`/`about:blank`, and a fresh private
+// window is `about:privatebrowsing` — none contain "://newtab". Exact-match
+// only: substring-matching "about:" would also swallow unrelated pages like
+// `about:config`.
+const NEW_TAB_URLS = new Set(['about:home', 'about:newtab', 'about:blank', 'about:privatebrowsing']);
+const isNewWindow = window => window?.tabs?.length === 1 && (!window?.tabs[0].url || window?.tabs[0].url.indexOf('://newtab') > 0 || NEW_TAB_URLS.has(window.tabs[0].url));
 
 // Helper function to check if user has enabled incognito access
 async function isIncognitoEnabled() {
@@ -977,6 +995,58 @@ async function isIncognitoEnabled() {
     console.warn('Could not check incognito access:', error);
     return false;
   }
+}
+
+// Helper function to check if the user has enabled "Allow access to file URLs".
+// Chrome/Edge reject tabs.create() with a file:// URL unless the user flips that
+// switch in the extension's details page; Firefox never lets extensions open
+// file:// tabs, and its isAllowedFileSchemeAccess() always resolves false —
+// both engines funnel into the same "skip and explain" path.
+async function isFileSchemeAccessAllowed() {
+  try {
+    if (typeof browser.extension?.isAllowedFileSchemeAccess !== 'function') {
+      // API unavailable: attempt the open rather than silently withholding tabs.
+      return true;
+    }
+    return await browser.extension.isAllowedFileSchemeAccess();
+  } catch (error) {
+    console.warn('Could not check file scheme access:', error);
+    return true;
+  }
+}
+
+const isFileSchemeUrl = (url) => typeof url === 'string' && url.toLowerCase().startsWith('file://');
+
+// Creates the destination window for the new-window "open collection" path.
+// Moved here (from the popup) so the whole "create window -> open tabs" sequence
+// runs in the background: on Firefox, focusing a brand-new window destroys the
+// popup document immediately, so any popup-side code after `windows.create()`
+// (including the old `runtime.sendMessage` call) never ran. The popup now only
+// builds `createWindowSpec` (bounds clamping still needs the popup's
+// window.screen-backed getDisplayInfo) and sends ONE message before any window
+// exists; this function - and the incognito fallback it replicates from the old
+// popup-side useCollectionOperations.js logic - does the rest atomically.
+async function createOpenTabsWindow(createWindowSpec) {
+  const windowCreationObject = { ...createWindowSpec };
+  let window;
+  try {
+    window = await browser.windows.create(windowCreationObject);
+  } catch (windowError) {
+    // If incognito window creation fails, fall back to a normal window. Build a
+    // fresh object for the retry rather than mutating `windowCreationObject`
+    // in place, so each `windows.create()` call is recorded with its own,
+    // independent arguments.
+    if (windowCreationObject.incognito) {
+      console.warn('Failed to create incognito window, falling back to normal:', windowError);
+      const fallbackWindowCreationObject = { ...windowCreationObject };
+      delete fallbackWindowCreationObject.incognito;
+      window = await browser.windows.create(fallbackWindowCreationObject);
+    } else {
+      throw windowError;
+    }
+  }
+  window.tabs = await browser.tabs.query({ windowId: window.id });
+  return window;
 }
 
 // Optimized openTabs function for better performance with large collections
@@ -999,18 +1069,22 @@ async function openTabs(collection, window, newWindow = null, trackOpenedWindow 
   const incognitoRestoreAttempted = wasFromIncognito && newWindow !== null;
   const incognitoRestoreSuccess = wasFromIncognito && isIncognitoWindow;
   
-  // Load settings once upfront
+  // Load settings once upfront. chkIgnoreDuplicates must be read unconditionally:
+  // the old `newWindow ?? get(...)` short-circuited to `false` whenever the popup
+  // sent newWindow:false (every same-window open), so "if a tab already exists,
+  // do not open it" was silently ignored — issue #94. Dedupe only applies to
+  // same-window opens; a freshly created window has no tabs worth skipping.
   const [
     { chkIgnoreDuplicates },
     { chkEnableTabDiscard }
   ] = await Promise.all([
-    newWindow ?? browser.storage.local.get('chkIgnoreDuplicates'),
+    browser.storage.local.get('chkIgnoreDuplicates'),
     browser.storage.local.get('chkEnableTabDiscard')
   ]);
-  
+
   // Pre-filter duplicates and prepare tab data
   const currentUrlsInWindow = window.tabs ? window.tabs.map(t => t.url) : [];
-  const duplicateUrls = chkIgnoreDuplicates ? new Set(currentUrlsInWindow) : new Set();
+  const duplicateUrls = (chkIgnoreDuplicates && !newWindow) ? new Set(currentUrlsInWindow) : new Set();
   const runtimeUrl = browser.runtime.getURL('deferedLoading.html');
   
   // URLs that cannot be opened in incognito mode
@@ -1025,7 +1099,15 @@ async function openTabs(collection, window, newWindow = null, trackOpenedWindow 
   // Pre-process all tabs to avoid repeated work
   const tabsToCreate = [];
   const skippedIncognitoTabs = [];
+  const skippedFileAccessTabs = [];
   const firstTabUpdate = isNewWindow(window);
+
+  // Only hit the isAllowedFileSchemeAccess API when the collection actually
+  // contains file:// tabs. Without the "Allow access to file URLs" permission,
+  // tabs.create() rejects file:// URLs — previously they just landed in
+  // tabsFailed with no explanation for the user.
+  const hasFileTabs = collection.tabs.some(t => isFileSchemeUrl(unwrapDeferredUrl(t.url)));
+  const fileAccessAllowed = hasFileTabs ? await isFileSchemeAccessAllowed() : true;
   
   for (let index = 0; index < totalTabs; index++) {
     const tabInGrp = collection.tabs[index];
@@ -1056,6 +1138,19 @@ async function openTabs(collection, window, newWindow = null, trackOpenedWindow 
       }
     }
 
+    // Skip file:// URLs when the user hasn't granted "Allow access to file URLs" —
+    // surfaced to the UI via skippedForFileAccess so it can explain how to enable it
+    // (mirrors the skippedIncognitoTabs pattern above; incognito skips win first so
+    // a file tab is never double-counted).
+    if (!fileAccessAllowed && isFileSchemeUrl(realUrl)) {
+      skippedFileAccessTabs.push({
+        url: realUrl,
+        title: tabInGrp.title,
+        reason: 'file-access-disabled'
+      });
+      continue;
+    }
+
     // Pre-calculate deferred URL
     // Note: Don't use deferred loading in incognito as extension pages may have issues
     const shouldDefer = !isIncognitoWindow && chkEnableTabDiscard && shouldDiscardTab({ ...tabInGrp, url: realUrl });
@@ -1084,8 +1179,29 @@ async function openTabs(collection, window, newWindow = null, trackOpenedWindow 
   
   // Log skipped tabs if any
   if (skippedIncognitoTabs.length > 0) {
-    console.warn(`Skipped ${skippedIncognitoTabs.length} tabs that cannot be opened in incognito:`, 
+    console.warn(`Skipped ${skippedIncognitoTabs.length} tabs that cannot be opened in incognito:`,
       skippedIncognitoTabs.map(t => t.url));
+  }
+  if (skippedFileAccessTabs.length > 0) {
+    console.warn(`Skipped ${skippedFileAccessTabs.length} file:// tabs - "Allow access to file URLs" is disabled:`,
+      skippedFileAccessTabs.map(t => t.url));
+    // Persist a pending notice for the UI instead of relying on the caller's
+    // toast: opening a collection shifts focus to the opened tabs/window, which
+    // tears the popup down before any post-open toast can render. The popup /
+    // full-page view picks this up on mount (or live via storage.onChanged) and
+    // shows the explanation then — see app/utils/fileAccessNotice.js. Also the
+    // only channel for the context-menu and keyboard-command open paths, which
+    // have no UI at all. Gated by the user's "Don't show again" choice.
+    try {
+      const { fileAccessNoticeDismissed } = await browser.storage.local.get('fileAccessNoticeDismissed');
+      if (!fileAccessNoticeDismissed) {
+        await browser.storage.local.set({
+          fileAccessNoticePending: { count: skippedFileAccessTabs.length, ts: Date.now() }
+        });
+      }
+    } catch (noticeError) {
+      console.warn('Could not persist file-access notice:', noticeError);
+    }
   }
   
   
@@ -1193,6 +1309,8 @@ async function openTabs(collection, window, newWindow = null, trackOpenedWindow 
     tabsOpened: successCount,
     tabsFailed: errorCount,
     skippedForIncognito: skippedIncognitoTabs.length,
+    skippedForFileAccess: skippedFileAccessTabs.length,
+    skippedFileAccessReason: skippedFileAccessTabs.length > 0 ? 'file-access-disabled' : null,
     wasFromIncognito: wasFromIncognito,
     restoredToIncognito: incognitoRestoreSuccess,
     incognitoAttempted: incognitoRestoreAttempted,
@@ -1931,14 +2049,47 @@ try {
 
     if (request.type === 'login') {
       try {
+        // CSRF nonce for this attempt only — sent inside `state` on the
+        // Firefox (viaWorker) path and verified against what the Worker
+        // callback echoes back before the code is ever exchanged. Chrome's
+        // pre-registered *.chromiumapp.org redirect doesn't use `state` at
+        // all, so the nonce is simply unused there.
+        // generateUidSafe() (not a bare crypto.randomUUID() call): Chrome
+        // 89-90 (this extension's manifest minimum_chrome_version) predates
+        // Crypto.randomUUID, and generateUidSafe already guards for that.
+        const loginNonce = generateUidSafe();
+        // Captured for the post-flow decision; getRedirectURL() is constant per
+        // profile, so the decision always matches the auth request sent below.
+        const authConfig = getAuthRedirectConfig();
         const redirectUrl = await browser.identity.launchWebAuthFlow({
-          'url': createAuthEndpoint(),
+          'url': createAuthEndpoint(loginNonce),
           'interactive': true
         });
         const url = new URL(redirectUrl);
         const urlParams = url.searchParams;
         const params = Object.fromEntries(urlParams.entries());
-        
+
+        if (authConfig.viaWorker) {
+          // The Worker echoes the original `state` string verbatim; decode
+          // it and REJECT — without exchanging the code — unless its nonce
+          // matches the one generated for this attempt. Throwing here routes
+          // through the existing catch below, so a nonce mismatch surfaces
+          // the exact same error shape as any other login failure.
+          if (!params.state) {
+            throw new Error('Missing OAuth state from Worker callback');
+          }
+          const state = base64UrlDecodeJson(params.state);
+          if (!state || state.n !== loginNonce) {
+            throw new Error('OAuth state nonce mismatch');
+          }
+          // A user declining consent (or Google erroring out) is the normal
+          // path here, not a failure worth attempting a doomed token
+          // exchange over — short-circuit before ever calling getTokens.
+          if (params.error || !params.code) {
+            throw new Error(`OAuth callback error: ${params.error || 'missing code'}`);
+          }
+        }
+
         const token = await getTokens(params.code);
         if (token === false) {
           console.error('Failed to get tokens during login');
@@ -2035,9 +2186,15 @@ try {
       }
     }
     if (request.type === 'openTabs') {
+      // New-window path: the popup sends `createWindowSpec` instead of a
+      // pre-created `window` so the create+open sequence happens atomically
+      // here, in the background, before the popup can be torn down.
+      const targetWindow = request.createWindowSpec
+        ? await createOpenTabsWindow(request.createWindowSpec)
+        : request.window;
       const result = await openTabs(
         request.collection,
-        request.window,
+        targetWindow,
         request.newWindow,
         request.trackOpenedWindow !== false
       );
@@ -2463,15 +2620,20 @@ try {
       }
       
       if (chkOpenNewWindow) {
-        window = await browser.windows.create({ 
+        // Reuse createOpenTabsWindow (the same helper the popup's createWindowSpec
+        // path uses) instead of a bare `windows.create()`, so this path gets the
+        // same incognito-creation-failure fallback and window.tabs population -
+        // this inline call never had that fallback, unlike every other
+        // "open in new window" entry point.
+        window = await createOpenTabsWindow({
           focused: true,
-          incognito: createIncognito 
+          incognito: createIncognito
         });
       } else {
         window = await browser.windows.getCurrent({ populate: true, windowTypes: ['normal'] });
+        window.tabs = await browser.tabs.query({ windowId: window.id });
       }
-      
-      window.tabs = await browser.tabs.query({ windowId: window.id });
+
       const result = await openTabs(collection, window, chkOpenNewWindow);
       
       // Log result for debugging
@@ -2538,31 +2700,30 @@ try {
   });
 
   const handleMenuClick = async (info, tab) => {
-    if (info.menuItemId === 'tabox-super') return;
-    let tabsArray = await loadAllCollectionsBG(true);
-    let tabToAdd = { ...tab };
-    const isClickOnTabGroup = info?.menuItemId?.includes('-main');
-    const collectionUid = isClickOnTabGroup ? info?.parentMenuItemId?.replace('-main', '') : info.menuItemId;
-    const collectionIndex = tabsArray.findIndex(c => c.uid === collectionUid);
-    if (collectionIndex === -1) return;
-    if (isClickOnTabGroup) {
-      const groupUid = info.menuItemId.split('|')[1];
-      const group = tabsArray[collectionIndex].chromeGroups?.find(cg => cg.uid === groupUid);
-      if (!group) return;
-      const indexInTabs = tabsArray[collectionIndex].tabs.findIndex(t => t.groupUid === group.uid);
-      tabToAdd.groupId = group.id;
-      tabToAdd.groupUid = group.uid;
-      tabsArray[collectionIndex]?.tabs?.splice(indexInTabs, 0, tabToAdd);
-    } else {
-      tabsArray[collectionIndex]?.tabs?.push(tabToAdd);
+    // Storage mutation + group/permission routing live in background-utils
+    // (handleContextMenuClickBG); this wrapper only picks the right sync.
+    const result = await handleContextMenuClickBG(info, tab);
+    if (!result?.handled) return;
+    if (result.isShared) {
+      // Shared-folder collections are owned by the Worker shared-sync engine,
+      // not Google Drive — nudge it instead of the Drive sync.
+      if (typeof syncSharedFolders === 'function') syncSharedFolders();
+      return;
     }
-
-    await saveSingleCollectionBG(tabsArray[collectionIndex], true);
     syncLegacyStorageThrottled();
     await handleRemoteUpdate();
   }
 
   browser.contextMenus.onClicked.addListener(handleMenuClick);
+
+  // Single choke point keeping the context menu in lockstep with storage:
+  // every mutation path (popup CRUD, folder ops, imports, Drive sync,
+  // shared-folder sync, share-link joins) writes these keys.
+  // Defined in background-utils.js (importScripts); absent in unit tests that
+  // load this file standalone.
+  if (typeof handleMenuStorageChanged === 'function') {
+    browser.storage.onChanged.addListener(handleMenuStorageChanged);
+  }
 
   const handleAutoBackupAlarm = async () => {
     const alarms = await browser.alarms.getAll();
@@ -2580,7 +2741,7 @@ try {
 
   browser.runtime.onInstalled.addListener(async (details) => {
     const previousVersion = details.previousVersion;
-    const currentVersion = chrome.runtime.getManifest().version;
+    const currentVersion = browser.runtime.getManifest().version;
     const reason = details.reason;
     
     // Handle migration for updates
@@ -2661,11 +2822,19 @@ try {
       console.error('Error during startup backup cleanup:', error);
     }
   }, 5000);
+
+  // Install-time storage writes are done past this point. E2E seeds wait on this
+  // marker so a late default (e.g. setInitialOptions' chkOpenNewWindow) can't land
+  // on top of a test's seeded values (see e2e/support/fixtures.mjs seedStorage).
+  globalThis.__taboxInstallSettled = true;
   })
 
   browser.runtime.onStartup.addListener(async () => {
     await setInitialOptions();
     await applyToolbarLaunchBehavior();
+    // Rebuild the context menu on every browser launch: menus persist across
+    // sessions, so any staleness would otherwise stick until the next mutation.
+    await handleContextMenuCreation();
     await handleAutoBackupAlarm();
     await ensureBackgroundSyncAlarm();
     await ensurePushSubscription();
@@ -2737,12 +2906,33 @@ try {
   });
 
   // window events
-  browser.windows.onRemoved.addListener(async windowId => {
+  const handleWindowRemoved = async windowId => {
     let { collectionsToTrack } = await browser.storage.local.get('collectionsToTrack');
     if (!collectionsToTrack || collectionsToTrack.length === 0) { return; }
     collectionsToTrack = collectionsToTrack.filter(c => c.windowId !== windowId);
     await browser.storage.local.set({ collectionsToTrack: collectionsToTrack });
-  }, { windowTypes: ['normal'] });
+  };
+  try {
+    browser.windows.onRemoved.addListener(handleWindowRemoved, { windowTypes: ['normal'] });
+  } catch {
+    // Firefox's WebExtensions argument validator rejects the { windowTypes }
+    // event filter on windows.onRemoved, synchronously, at background-script
+    // load time — but it throws a plain `Error` ("Incorrect argument types
+    // for windows.onRemoved."), NOT a TypeError, so this must catch any throw
+    // here rather than filtering by error type (that distinction isn't part
+    // of any spec and isn't future-proof). Since this call sits at the top
+    // level, an uncaught throw would abort every listener registration after
+    // it (windows.onCreated/onFocusChanged/onBoundsChanged, all tabs.*
+    // events, etc.) — auto-update, badge, and window tracking would all
+    // silently stop working on Firefox. Fall back to registering the same
+    // callback without the filter: it's safe because the callback body only
+    // prunes collectionsToTrack entries by windowId, which is a correct (and
+    // harmless) no-op for non-"normal" window types too. If the unfiltered
+    // registration itself throws, there's no further fallback to try — it
+    // propagates out of this try/catch (and from there into the pre-existing
+    // outer try/catch that already wraps this whole startup block).
+    browser.windows.onRemoved.addListener(handleWindowRemoved);
+  }
 
   browser.windows.onCreated.addListener(async () => {
     await handleBadge();
@@ -2752,7 +2942,8 @@ try {
     await handleBadge();
   });
 
-  browser.windows.onBoundsChanged.addListener(async window => {
+  // Firefox doesn't implement onBoundsChanged; window move/resize won't trigger auto-update there (tab events still do)
+  browser.windows.onBoundsChanged?.addListener(async window => {
     debounceAutoUpdate(window.id, 5000); // Debounced auto-update
   });
 
@@ -2798,4 +2989,14 @@ try {
 
 } catch (e) {
   console.error(e)
+}
+
+// Test-only export: background.js is loaded as a classic script (importScripts
+// in Chrome's MV3 service worker, manifest background.scripts pre-load in
+// Firefox's event page) and has no other module.exports surface. isNewWindow
+// is a pure, module-scope function not otherwise reachable from tests
+// (unlike the helpers in background-utils.js), so expose it the same way
+// background-utils.js exposes its testables.
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { isNewWindow };
 }

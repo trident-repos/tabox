@@ -1,5 +1,5 @@
 import { test, expect } from 'crxbox';
-import { buildSeed, collectionIndexEntry, openFullPage, T } from './support/fixtures.mjs';
+import { buildSeed, collectionIndexEntry, openFullPage, T, seedStorage } from './support/fixtures.mjs';
 
 // Batch A — tab lifecycle: opening a collection's tabs, and importing data.
 //
@@ -15,7 +15,7 @@ test('opening a collection launches its tabs and marks it opened', async ({ ext,
     { title: 'Idx', url: ext.url('index.html') },
     { title: 'Full', url: ext.url('fullpage.html') },
   ];
-  await ext.storage.local.set({
+  await seedStorage(ext, {
     collections_index: { 'col-a': collectionIndexEntry('Alpha', { order: 0 }) },
     'collection_col-a': {
       uid: 'col-a', name: 'Alpha', color: '#4fc3f7', parentId: null, order: 0,
@@ -62,7 +62,7 @@ test('importData (full_export) creates the imported collections', async ({ ext }
 });
 
 test('importData (single collection) creates one collection', async ({ ext }) => {
-  await ext.storage.local.set(buildSeed({ collections: [{ uid: 'col-x', name: 'Existing', order: 0 }] }));
+  await seedStorage(ext, buildSeed({ collections: [{ uid: 'col-x', name: 'Existing', order: 0 }] }));
 
   const result = await ext.background.sendMessage({
     type: 'importData',

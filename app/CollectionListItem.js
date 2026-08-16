@@ -19,6 +19,7 @@ import './AIEffects.css';
 import ColorPicker from './ColorPicker';
 import { useCollectionOperations } from './useCollectionOperations';
 import { buildCollectionUrlList, copyToClipboard } from './utils/index';
+import { safeFavIconUrl } from './utils/sharedConstants';
 import { showSuccessToast, showErrorToast, showInfoToast } from './toastHelpers';
 import { browser } from '../static/globals';
 import DroppableCollection from './DroppableCollection';
@@ -371,17 +372,20 @@ function CollectionListItem(props) {
             
             {/* Favicon preview */}
             <div className="collection-favicon-preview" onClick={(e) => e.stopPropagation()}>
-                {previewTabs.slice(0, 4).map((tab, idx) => (
-                    <img
-                        key={idx}
-                        src={tab.favIconUrl}
-                        alt=""
-                        className="preview-favicon"
-                        data-tooltip-id="main-tooltip"
-                        data-tooltip-content={tab.title}
-                        onError={(e) => { e.target.style.display = 'none'; }}
-                    />
-                ))}
+                {previewTabs.slice(0, 4).map((tab, idx) => {
+                    const src = safeFavIconUrl(tab.favIconUrl, null);
+                    return src ? (
+                        <img
+                            key={idx}
+                            src={src}
+                            alt=""
+                            className="preview-favicon"
+                            data-tooltip-id="main-tooltip"
+                            data-tooltip-content={tab.title}
+                            onError={(e) => { e.target.style.display = 'none'; }}
+                        />
+                    ) : null;
+                })}
                 {props.collection.tabs?.length > 4 && (
                     <span className="favicon-count">+{props.collection.tabs.length - 4}</span>
                 )}
@@ -462,9 +466,9 @@ function CollectionListItem(props) {
                                 browser.tabs.create({ url: tab.url, active: true });
                             }}
                         >
-                            {tab.favIconUrl && (
+                            {safeFavIconUrl(tab.favIconUrl, null) && (
                                 <img
-                                    src={tab.favIconUrl}
+                                    src={safeFavIconUrl(tab.favIconUrl, null)}
                                     alt=""
                                     className="matching-tab-favicon"
                                     onError={(e) => { e.target.style.display = 'none'; }}

@@ -10,11 +10,10 @@ import { loadAllCollections, deleteSingleCollection, updateFolderCollectionCount
 import { getNextFavoriteOrder } from './utils/favoritesUtils';
 import { noPermissionOpenState } from './atoms/sharedFoldersState';
 import { canEditFolder, guardFolderEdit } from './utils/sharedFolderUtils';
+import { getDisplayInfo } from './utils/displayInfo';
 
 export const openCollectionTabs = async ({
     collectionToOpen,
-    updateCollection,
-    openedCollectionToTrack = collectionToOpen,
     trackOpenedWindow = true
 }) => {
     const { chkOpenNewWindow } = await browser.storage.local.get('chkOpenNewWindow');
@@ -33,7 +32,16 @@ export const openCollectionTabs = async ({
         }
     }
 
-    let window;
+    // New-window path: build the window-creation spec here (bounds clamping needs
+    // getDisplayInfo, which falls back to the popup's window.screen on Firefox) but
+    // send it to the background WITHOUT creating the window first. On Firefox,
+    // focusing a brand-new window destroys the popup document immediately, so any
+    // popup-side code after `windows.create()` - including the `sendMessage` call
+    // itself - never ran, leaving a blank window. The background now creates the
+    // window (including the incognito fallback, replicated in
+    // chrome/background.js's `createOpenTabsWindow`) and opens the tabs atomically
+    // in response to a single message sent before any window exists.
+    let msg;
     if (chkOpenNewWindow) {
         let windowCreationObject = { focused: true };
 
@@ -45,7 +53,7 @@ export const openCollectionTabs = async ({
         if (collectionToOpen.window && !windowCreationObject.incognito) {
             // Window position only applies to normal windows
             try {
-                const displays = await browser.system.display.getInfo();
+                const displays = await getDisplayInfo();
 
                 let targetBounds = {
                     top: Math.round(collectionToOpen.window.top),
@@ -88,30 +96,24 @@ export const openCollectionTabs = async ({
             }
         }
 
-        try {
-            window = await browser.windows.create(windowCreationObject);
-        } catch (windowError) {
-            // If incognito window creation fails, fall back to normal window
-            if (windowCreationObject.incognito) {
-                console.warn('Failed to create incognito window, falling back to normal:', windowError);
-                delete windowCreationObject.incognito;
-                window = await browser.windows.create(windowCreationObject);
-            } else {
-                throw windowError;
-            }
-        }
-        window.tabs = await browser.tabs.query({ windowId: window.id });
+        msg = {
+            type: 'openTabs',
+            collection: collectionToOpen,
+            createWindowSpec: windowCreationObject,
+            newWindow: true,
+            trackOpenedWindow
+        };
     } else {
-        window = await browser.windows.getCurrent({ populate: true, windowTypes: ['normal'] });
+        const window = await browser.windows.getCurrent({ populate: true, windowTypes: ['normal'] });
+        msg = {
+            type: 'openTabs',
+            collection: collectionToOpen,
+            window,
+            newWindow: false,
+            trackOpenedWindow
+        };
     }
 
-    const msg = {
-        type: 'openTabs',
-        collection: collectionToOpen,
-        window,
-        newWindow: chkOpenNewWindow,
-        trackOpenedWindow
-    };
     const result = await browser.runtime.sendMessage(msg);
 
     // Show feedback for incognito-related scenarios
@@ -129,17 +131,25 @@ export const openCollectionTabs = async ({
                 4000
             );
         }
+        // skippedForFileAccess is intentionally NOT toasted here: opening the
+        // collection shifts focus to the opened tabs/window, tearing this popup
+        // down before a toast could render. The background persists
+        // fileAccessNoticePending instead, and App.js's
+        // initFileAccessNoticeWatcher surfaces it in whichever view can
+        // actually display it (live in full-page, next open for the popup).
     }
 
-    if (openedCollectionToTrack && updateCollection) {
-        // Opening a collection is never blocked by folder permissions (read-only
-        // members can always open); this only bumps a local, unsynced timestamp.
-        await updateCollection({
-            ...openedCollectionToTrack,
-            lastOpened: Date.now(),
-            __skipFolderGuard: true
-        });
-    }
+    // `lastOpened` is intentionally NOT stamped here anymore. The background
+    // `openTabs` handler (chrome/background.js) already persists it
+    // authoritatively for every path - including this one - via
+    // `markCollectionOpenedBG`, which runs (and resolves, since `result` above
+    // awaited it) before this line. Stamping it again here was always
+    // redundant on Chrome and, on Firefox, this code never even ran for the
+    // new-window path (the popup document is destroyed the instant the new
+    // window takes focus) - which was the root cause of this bug for the
+    // window itself and would have silently dropped `lastOpened` too. The
+    // popup UI picks the change up via its `browser.storage.onChanged`
+    // listener (see app/App.js), same as any other background-driven write.
 
     return result;
 };
@@ -356,9 +366,7 @@ export function useCollectionOperations({
         }
 
         await openCollectionTabs({
-            collectionToOpen: collection,
-            updateCollection,
-            openedCollectionToTrack: collection
+            collectionToOpen: collection
         });
     };
 
@@ -372,7 +380,28 @@ export function useCollectionOperations({
         const { collectionsToTrack } = await browser.storage.local.get('collectionsToTrack') || [];
         const activeWindowId = collectionsToTrack.find(c => c.collectionUid === collection.uid)?.windowId;
         if (!activeWindowId) return;
-        
+
+        // A tracking entry can go stale: the tracked window may be gone, or may no
+        // longer contain any of the collection's tabs (e.g. the collection was opened
+        // into the current window and its tabs were closed one by one — windows.onRemoved
+        // never fires, so the entry lingers and "Open" would silently focus forever;
+        // issue #90/#99). Verify before focusing; if stale, drop the entry and open.
+        const stillOpenInWindow = await (async () => {
+            try {
+                const win = await browser.windows.get(activeWindowId, { populate: true });
+                const collectionUrls = (collection.tabs || []).map(t => t.url).filter(Boolean);
+                return (win.tabs || []).some(t =>
+                    collectionUrls.some(u => t.url === u || (t.url && t.url.includes(encodeURIComponent(u)))));
+            } catch {
+                return false; // window no longer exists
+            }
+        })();
+        if (!stillOpenInWindow) {
+            await _handleStopTracking();
+            await openCollectionTabs({ collectionToOpen: collection });
+            return;
+        }
+
         const msg = {
             type: 'focusWindow',
             windowId: activeWindowId
@@ -401,6 +430,14 @@ export function useCollectionOperations({
     };
 
     const _isAutoUpdate = async () => {
+        // Must mirror the row UI's loadAutoUpdateStatus (CollectionListItem.js): a
+        // collection only behaves as auto-tracked when the auto-update setting is ON.
+        // Every open registers a collectionsToTrack entry (trackOpenedWindow defaults
+        // to true), so checking membership alone made _handleOpenTabs reroute every
+        // second "Open" click to a window-focus no-op while the button still said
+        // "Open" (issue #90/#99).
+        const { chkEnableAutoUpdate } = await browser.storage.local.get('chkEnableAutoUpdate');
+        if (!chkEnableAutoUpdate) return false;
         let { collectionsToTrack } = await browser.storage.local.get('collectionsToTrack');
         collectionsToTrack = collectionsToTrack || [];
         return collectionsToTrack.some(c => c.collectionUid === collection.uid);

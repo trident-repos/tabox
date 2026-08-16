@@ -1,10 +1,10 @@
 import { test, expect } from 'crxbox';
-import { buildSeed, openFullPage } from './support/fixtures.mjs';
+import { buildSeed, openFullPage, seedStorage } from './support/fixtures.mjs';
 
 // Batch D — detail panel + bulk delete (full-page).
 
 test('clicking a collection card opens the detail panel', async ({ ext, context }) => {
-  await ext.storage.local.set(buildSeed({ collections: [{ uid: 'col-a', name: 'Alpha' }] }));
+  await seedStorage(ext, buildSeed({ collections: [{ uid: 'col-a', name: 'Alpha' }] }));
   const page = await openFullPage(ext);
 
   // The card body click handler is `onSelect` → opens the detail panel.
@@ -15,7 +15,7 @@ test('clicking a collection card opens the detail panel', async ({ ext, context 
 });
 
 test('bulk-selecting cards and deleting removes them all', async ({ ext, context }) => {
-  await ext.storage.local.set(
+  await seedStorage(ext,
     buildSeed({
       collections: [
         { uid: 'col-a', name: 'Alpha', order: 0 },

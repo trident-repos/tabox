@@ -1,5 +1,5 @@
 import { test, expect } from 'crxbox';
-import { buildSeed, openFullPage } from './support/fixtures.mjs';
+import { buildSeed, openFullPage, seedStorage } from './support/fixtures.mjs';
 
 // Batch B+C — collection operations.
 //
@@ -11,14 +11,13 @@ import { buildSeed, openFullPage } from './support/fixtures.mjs';
 // data".) Logged as a testability-boundary finding in crxbox-feedback.md.
 
 test('duplicates a collection from the card menu', async ({ ext, context }) => {
-  await ext.storage.local.set(buildSeed({ collections: [{ uid: 'col-a', name: 'Alpha', order: 0 }] }));
+  await seedStorage(ext, buildSeed({ collections: [{ uid: 'col-a', name: 'Alpha', order: 0 }] }));
   const page = await openFullPage(ext);
   await expect(page.locator('.fp-collection-card')).toHaveCount(1);
 
   const card = page.locator('[data-sortable-collection-id="col-a"]');
-  await card.hover();
-  await card.locator('.fp-card-menu-option').click();
-  await page.locator('.context-menu-item', { hasText: 'Duplicate Collection' }).click();
+  await card.click({ button: 'right' });
+  await page.locator('.fp-card-ctx-item', { hasText: 'Duplicate Collection' }).click();
 
   // A second collection now exists; the original remains.
   await expect(page.locator('.fp-collection-card')).toHaveCount(2);
@@ -32,7 +31,7 @@ test('duplicates a collection from the card menu', async ({ ext, context }) => {
 });
 
 test('changes a collection color via the color picker', async ({ ext, context }) => {
-  await ext.storage.local.set(buildSeed({ collections: [{ uid: 'col-a', name: 'Alpha', order: 0 }] }));
+  await seedStorage(ext, buildSeed({ collections: [{ uid: 'col-a', name: 'Alpha', order: 0 }] }));
   const page = await openFullPage(ext);
 
   const card = page.locator('[data-sortable-collection-id="col-a"]');
@@ -48,7 +47,8 @@ test('changes a collection color via the color picker', async ({ ext, context })
 });
 
 test('moves a collection into a folder by dragging onto the sidebar', async ({ ext, context }) => {
-  await ext.storage.local.set(
+  await seedStorage(
+    ext,
     buildSeed({
       collections: [{ uid: 'col-a', name: 'Alpha', order: 0 }],
       folders: [{ uid: 'fold-1', name: 'Work', order: 0 }],

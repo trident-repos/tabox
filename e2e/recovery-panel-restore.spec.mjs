@@ -1,4 +1,5 @@
 import { test, expect } from 'crxbox';
+import { NO_ONBOARDING, seedStorage } from './support/fixtures.mjs';
 
 // E2E (full-page variant): fullpage.html → Settings → "Recovery" category →
 // rich SyncDebugRecoveryPanel → Restore an auto backup → collections updated.
@@ -30,6 +31,9 @@ const indexEntry = (name, color, tabCount) => ({
 });
 
 const SEED = {
+  // Suppress the fresh-install onboarding overlay — the SW's late
+  // onboardingEligible write can land after this seed (see fixtures.mjs).
+  ...NO_ONBOARDING,
   // Seed a logged-in session (harmless here; keeps parity with the popup test and avoids
   // any sync-gated UI surprises).
   syncSessionState: {
@@ -104,7 +108,7 @@ const SEED = {
 };
 
 test('full-page Recovery panel restores an auto backup via the confirm dialog', async ({ ext, context }) => {
-  await ext.storage.local.set(SEED);
+  await seedStorage(ext, SEED);
 
   const page = await context.newPage();
 

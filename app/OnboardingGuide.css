@@ -53,6 +53,9 @@
   position:relative;
   height:260px;
   flex:0 0 260px;
+  /* Query container so scene keyframes can travel by frame width (100cqw)
+     with transform instead of reflow-per-frame left/top animation. */
+  container-type:inline-size;
   overflow:hidden;
   border:1px solid color-mix(in srgb, var(--onboarding-accent) 16%, var(--divider-color));
   border-radius:20px;
@@ -125,16 +128,19 @@
   z-index:9;
   display:grid;
   place-items:center;
-  color:transparent;
-  background:
-    linear-gradient(90deg, #6757e8, #50c8ff),
-    linear-gradient(150deg, color-mix(in srgb, #6d5be8 12%, var(--bg-color)), color-mix(in srgb, #57badf 9%, var(--bg-color)));
-  background-clip:text, border-box;
-  -webkit-background-clip:text, border-box;
+  background: linear-gradient(150deg, color-mix(in srgb, #6d5be8 12%, var(--bg-color)), color-mix(in srgb, #57badf 9%, var(--bg-color)));
   font-size:54px;
   font-weight:850;
   letter-spacing:-.04em;
   pointer-events:none;
+}
+/* Firefox mispaints `background-clip: text` inside a multi-layer list, so the
+   text gradient lives on its own element with a single-value clip. */
+.welcome-scene-intro span {
+  color:transparent;
+  background:linear-gradient(90deg, #6757e8, #50c8ff);
+  background-clip:text;
+  -webkit-background-clip:text;
 }
 .welcome-scene.is-active .welcome-scene-intro { animation:welcome-scene-intro 3.2s cubic-bezier(.22,.8,.3,1); }
 .welcome-browser-frame { position: absolute; z-index: 3; top: 25px; left: 25px; width: 304px; height: 138px; overflow: hidden; background: var(--bg-color); border: 1px solid var(--divider-color); border-radius: 12px; box-shadow: 0 13px 27px rgba(39,36,82,.16); }
@@ -205,7 +211,9 @@
 @keyframes welcome-scene-intro { 0% { opacity:0; transform:scale(.82); } 24%,65% { opacity:1; transform:scale(1); } 100% { opacity:0; transform:scale(1.08); visibility:hidden; } }
 @keyframes browser-tabs-save { 0%,12% { opacity:1; transform:translate(0,0) scale(1); } 31% { opacity:1; transform:translate(var(--tab-flight-x),68px) scale(.14); } 36%,100% { opacity:0; transform:translate(var(--tab-flight-x),68px) scale(.14); } }
 @keyframes browser-frame-clears { 0%,42% { opacity:1; transform:translateX(0) scale(1); } 58%,100% { opacity:0; transform:translateX(-120px) scale(.88); } }
-@keyframes saved-box-to-tabox { 0%,26% { left:85px; top:96px; opacity:1; transform:scale(1); } 34% { left:85px; top:96px; opacity:1; transform:scale(1.06); box-shadow:0 0 22px rgba(103,87,232,.34); } 45%,64% { left:85px; top:96px; opacity:1; transform:scale(1); } 86%,100% { left:calc(100% - 217px); top:97px; opacity:1; transform:scale(1); box-shadow:0 0 18px rgba(103,87,232,.24); } }
+/* Flight distance = (frame width - 217px) - 85px start; transform keeps the
+   move on the compositor (animating left/top reflows every frame). */
+@keyframes saved-box-to-tabox { 0%,26% { opacity:1; transform:translate(0,0) scale(1); } 34% { opacity:1; transform:translate(0,0) scale(1.06); box-shadow:0 0 22px rgba(103,87,232,.34); } 45%,64% { opacity:1; transform:translate(0,0) scale(1); } 86%,100% { opacity:1; transform:translate(calc(100cqw - 302px), 1px) scale(1); box-shadow:0 0 18px rgba(103,87,232,.24); } }
 @keyframes saved-box-check { 0%,82% { opacity:0; transform:scale(.55); } 92%,100% { opacity:1; transform:scale(1); } }
 @keyframes tabox-ui-slides-in { 0%,45% { transform:translateX(245px); } 68%,100% { transform:translateX(0); } }
 @keyframes save-and-search-typing { 0%,5% { width: 0; } 23%,36% { width: 82px; } 42%,50% { width: 0; } 70%,100% { width: 82px; } }

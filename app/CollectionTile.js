@@ -18,6 +18,7 @@ import './AIEffects.css';
 
 import { getColorValue } from './utils/colorMigration';
 import { buildCollectionUrlList, copyToClipboard, countNonEmptyGroups } from './utils/index';
+import { safeFavIconUrl } from './utils/sharedConstants';
 import { showSuccessToast, showErrorToast, showInfoToast } from './toastHelpers';
 import ColorPicker from './ColorPicker';
 import { useCollectionOperations } from './useCollectionOperations';
@@ -177,7 +178,7 @@ function CollectionTile(props) {
     // Get first 10 favicons
     const favicons = useMemo(() => {
         const tabs = props.collection.tabs || [];
-        return tabs.slice(0, 10).map(tab => tab.favIconUrl).filter(Boolean);
+        return tabs.slice(0, 10).map(tab => safeFavIconUrl(tab.favIconUrl, null)).filter(Boolean);
     }, [props.collection.tabs]);
     const formatTimeAgo = (timestamp) => {
         try {

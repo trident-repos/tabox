@@ -10,7 +10,7 @@ import {
     initialSelectionIndex,
     RESULT_CAP,
 } from './utils/tabSwitcherUtils';
-import { FALLBACK_FAVICON } from './utils/sharedConstants';
+import { FALLBACK_FAVICON, safeFavIconUrl } from './utils/sharedConstants';
 import useListNavigation from './useListNavigation';
 import ContextMenu from './ContextMenu';
 import { copyToClipboard } from './utils/index';
@@ -47,7 +47,7 @@ const TabSwitcherRow = React.memo(function TabSwitcherRow({ entry, index, isSele
         >
             <img
                 className="tab-switcher-favicon"
-                src={entry.favIconUrl || FALLBACK_FAVICON}
+                src={safeFavIconUrl(entry.favIconUrl)}
                 onError={(e) => { e.currentTarget.src = FALLBACK_FAVICON; }}
                 alt=""
             />
@@ -85,7 +85,7 @@ function TabPreviewPane({ entry }) {
             <div className="tab-switcher-preview-card">
                 <img
                     className="tab-switcher-preview-favicon"
-                    src={entry.favIconUrl || FALLBACK_FAVICON}
+                    src={safeFavIconUrl(entry.favIconUrl)}
                     onError={(e) => { e.currentTarget.src = FALLBACK_FAVICON; }}
                     alt=""
                 />

@@ -18,7 +18,7 @@ const STORAGE_KEYS = {
 // Google OAuth token exchanges go through the Tabox Worker (which holds the
 // client secret); resolve the base URL from pro-config.js in both the
 // classic-script (importScripts) world and Jest/CommonJS.
-/* global PRO_API_BASE */
+/* global PRO_API_BASE, OAUTH_CLIENT_ID, OAUTH_SCOPES */
 const AUTH_API_BASE = typeof require === 'function'
     ? require('./pro-config').PRO_API_BASE
     : PRO_API_BASE;
@@ -821,98 +821,248 @@ function updateCollectionsUids(collections) {
     return tabsArray;
 }
 
-const createCollectionContextMenu = (collection) => {
-    browser.contextMenus.create({
-        title: collection.name,
+// ========================================
+// CONTEXT MENU (right click → "Add tab to Tabox Collection")
+// ========================================
+// The menu is rebuilt from a debounced storage.onChanged listener (see
+// handleMenuStorageChanged, registered in background.js). Storage is the
+// single choke point every mutation path goes through — popup CRUD, folder
+// ops, imports, Drive sync, shared-folder sync, share-link joins — so the
+// menu can never drift from what actually exists, unlike the old design that
+// relied on each path remembering to send an 'addCollection' message.
+
+// A group only renders in the submenu when at least one tab still references
+// it — orphaned groups linger in chromeGroups purely so undo can re-attach
+// tabs (same rule as app/utils/groupCount.js countNonEmptyGroups).
+const nonEmptyGroupsBG = (collection) => {
+    const groups = Array.isArray(collection?.chromeGroups) ? collection.chromeGroups : [];
+    if (groups.length === 0) return [];
+    const groupUidsWithTabs = new Set(
+        (collection.tabs || []).filter((tab) => tab && tab.groupUid).map((tab) => tab.groupUid)
+    );
+    return groups.filter((group) => group && groupUidsWithTabs.has(group.uid));
+};
+
+// Pure model builder: returns the ordered contextMenus.create() params for the
+// whole menu. Collections inside a read-only shared folder are excluded —
+// the menu is a write surface, and 'read' members must not see them.
+const buildContextMenuModel = (collections, folders) => {
+    const readOnlyFolderUids = new Set(
+        (folders || [])
+            .filter((folder) => folder?.shared?.folderId && folder.shared.role === 'read')
+            .map((folder) => folder.uid)
+    );
+    const visible = (collections || []).filter((collection) =>
+        collection && !readOnlyFolderUids.has(collection.parentId));
+    if (visible.length === 0) return [];
+
+    const model = [{
+        title: 'Add tab to Tabox Collection',
         contexts: ['all'],
-        parentId: 'tabox-super',
-        id: collection.chromeGroups?.length > 0 ? `${collection.uid}-main` : collection.uid,
-    });
-    if (collection.chromeGroups && collection.chromeGroups.length > 0) {
-        browser.contextMenus.create({
+        id: 'tabox-super',
+    }];
+    visible.forEach((collection) => {
+        const groups = nonEmptyGroupsBG(collection);
+        if (groups.length === 0) {
+            model.push({
+                title: collection.name,
+                contexts: ['all'],
+                parentId: 'tabox-super',
+                id: collection.uid,
+            });
+            return;
+        }
+        model.push({
+            title: collection.name,
+            contexts: ['all'],
+            parentId: 'tabox-super',
+            id: `${collection.uid}-main`,
+        });
+        model.push({
             title: 'Add tab to this collection',
             contexts: ['all'],
             parentId: `${collection.uid}-main`,
             id: collection.uid,
         });
-        browser.contextMenus.create({
+        model.push({
             parentId: `${collection.uid}-main`,
             id: `${collection.uid}-seperator`,
-            type: 'separator'
+            type: 'separator',
         });
-        browser.contextMenus.create({
+        model.push({
             title: 'Add tab to a group inside this collection',
             contexts: ['all'],
             enabled: false,
             parentId: `${collection.uid}-main`,
             id: `${collection.uid}-title`,
         });
-        collection.chromeGroups.forEach(cg => {
-            browser.contextMenus.create({
+        groups.forEach((cg) => {
+            model.push({
                 title: cg.title || '-',
                 contexts: ['all'],
                 parentId: `${collection.uid}-main`,
-                id: `${Math.random().toString(36).slice(2)}|${cg.uid}`,
+                // Deterministic id carrying both uids so the click handler can
+                // route without relying on parentMenuItemId.
+                id: `${collection.uid}|${cg.uid}`,
             });
-        })
-    }
-}
+        });
+    });
+    return model;
+};
 
-// Context menu throttling - update at most once every 5 seconds
+// Routes a clicked menu item id to its target. Structural ids (the super
+// item, submenu parents, separators, the disabled title row) resolve to null.
+const resolveContextMenuClick = (menuItemId) => {
+    if (typeof menuItemId !== 'string' || menuItemId === 'tabox-super') return null;
+    if (menuItemId.endsWith('-main') || menuItemId.endsWith('-title') || menuItemId.endsWith('-seperator')) return null;
+    if (menuItemId.includes('|')) {
+        const [collectionUid, groupUid] = menuItemId.split('|');
+        return { collectionUid, groupUid };
+    }
+    return { collectionUid: menuItemId, groupUid: null };
+};
+
+// Applies a context menu click: appends the tab to the target collection (or
+// into the clicked group). Returns { handled, isShared } so background.js can
+// decide which sync to nudge. Read-only shared folders are blocked here too
+// (defense in depth — their collections shouldn't be in the menu at all).
+const handleContextMenuClickBG = async (info, tab) => {
+    const target = resolveContextMenuClick(info?.menuItemId);
+    if (!target) return { handled: false };
+    const collection = await loadSingleCollectionBG(target.collectionUid);
+    if (!collection) return { handled: false };
+
+    const parentFolder = collection.parentId ? await loadSingleFolderBG(collection.parentId) : null;
+    const isShared = Boolean(parentFolder?.shared?.folderId);
+    if (parentFolder?.shared?.role === 'read') return { handled: false };
+
+    const tabToAdd = { ...tab };
+    collection.tabs = Array.isArray(collection.tabs) ? collection.tabs : [];
+    if (target.groupUid) {
+        const group = (collection.chromeGroups || []).find((cg) => cg.uid === target.groupUid);
+        if (!group) return { handled: false };
+        tabToAdd.groupId = group.id;
+        tabToAdd.groupUid = group.uid;
+        const indexInTabs = collection.tabs.findIndex((t) => t.groupUid === group.uid);
+        if (indexInTabs === -1) {
+            collection.tabs.push(tabToAdd);
+        } else {
+            collection.tabs.splice(indexInTabs, 0, tabToAdd);
+        }
+    } else {
+        collection.tabs.push(tabToAdd);
+    }
+
+    const saved = await saveSingleCollectionBG(collection, true);
+    return { handled: saved === true, isShared };
+};
+
+// Debounced rebuild. A fingerprint of the last-applied model skips redundant
+// removeAll/create cycles (auto-updated collections churn storage on every
+// tab event without changing the menu).
+const CONTEXT_MENU_DEBOUNCE_MS = 1500;
 let contextMenuTimeout = null;
-let pendingContextMenuUpdate = false;
+let lastContextMenuFingerprint = null;
+
+const rebuildContextMenuNow = async () => {
+    const [tabsArray, foldersArray] = await Promise.all([
+        loadAllCollectionsBG(true),
+        loadAllFoldersBG(),
+    ]);
+    const model = buildContextMenuModel(tabsArray, foldersArray);
+    const fingerprint = JSON.stringify(model);
+    if (fingerprint === lastContextMenuFingerprint) return;
+    await browser.contextMenus.removeAll();
+    model.forEach((item) => browser.contextMenus.create(item));
+    lastContextMenuFingerprint = fingerprint;
+    // Debug/e2e observability: what the menu was last built from.
+    if (typeof globalThis !== 'undefined') {
+        globalThis.__taboxContextMenu = {
+            rebuilds: (globalThis.__taboxContextMenu?.rebuilds || 0) + 1,
+            model,
+        };
+    }
+};
 
 const handleContextMenuCreation = async () => {
-    pendingContextMenuUpdate = true;
-    
     if (contextMenuTimeout) {
-        return; // Already scheduled
+        clearTimeout(contextMenuTimeout);
     }
-    
     contextMenuTimeout = setTimeout(async () => {
-        if (pendingContextMenuUpdate) {
-            await browser.contextMenus.removeAll();
-            // 🚀 NEW: Load from indexed storage
-            const tabsArray = await loadAllCollectionsBG(true);
-            if (tabsArray && tabsArray.length > 0) {
-                setTimeout(() => {
-                    browser.contextMenus.create({
-                        title: 'Add tab to Tabox Collection',
-                        contexts: ['all'],
-                        id: 'tabox-super'
-                    });
-                    tabsArray.forEach(collection => createCollectionContextMenu(collection));
-                }, 500);
-            }
-            pendingContextMenuUpdate = false;
-        }
         contextMenuTimeout = null;
-    }, 5000); // 5 seconds throttle
-}
+        try {
+            await rebuildContextMenuNow();
+        } catch (error) {
+            console.error('Context menu rebuild failed:', error);
+        }
+    }, CONTEXT_MENU_DEBOUNCE_MS);
+};
 
-function applyChromeGroupSettings(windowId, collection) {
+// storage.onChanged listener: any write touching collections/folders (index
+// or individual records) schedules a rebuild. Note the '_' in the prefixes —
+// unrelated keys like 'collectionsToTrack' must not match.
+const handleMenuStorageChanged = (changes, areaName) => {
+    if (areaName !== 'local') return;
+    const relevant = Object.keys(changes).some((key) =>
+        key === STORAGE_KEYS.COLLECTIONS_INDEX ||
+        key === STORAGE_KEYS.FOLDERS_INDEX ||
+        key.startsWith(STORAGE_KEYS.COLLECTION_PREFIX) ||
+        key.startsWith(STORAGE_KEYS.FOLDER_PREFIX));
+    if (relevant) {
+        handleContextMenuCreation();
+    }
+};
+
+async function applyChromeGroupSettings(windowId, collection) {
     if (!collection.chromeGroups || !browser.tabs.group || !browser.tabGroups) {
         return;
     }
-    collection.chromeGroups.forEach((chromeGroup) => {
-        const tabsToGroup = collection.tabs.filter(({ groupId }) => chromeGroup.id === groupId).map((t) => t.newTabId);
-        const groupProperties = {
-            createProperties: {
-                windowId: windowId
-            },
-            tabIds: tabsToGroup
+    // Reuse groups already in the target window instead of minting an identical
+    // one on every open (issue #94 — Chrome additionally saves each created group
+    // to its Tab Groups menu, so duplicates piled up there). "Same group" matches
+    // the app's own duplicate-group definition: identical title AND color.
+    let existingGroups = [];
+    try {
+        existingGroups = await browser.tabGroups.query({ windowId });
+    } catch {
+        existingGroups = [];
+    }
+    for (const chromeGroup of collection.chromeGroups) {
+        // Match by the stable groupUid (what the UI groups by) — the numeric
+        // Chrome-session groupId drifts across sync/merge/import, so relying on
+        // it silently restored every tab flat. Legacy tabs/groups that predate
+        // groupUid fall back to the numeric id.
+        const tabsToGroup = collection.tabs
+            .filter((tab) => (tab.groupUid && chromeGroup.uid)
+                ? tab.groupUid === chromeGroup.uid
+                : tab.groupId === chromeGroup.id)
+            .map((t) => t.newTabId)
+            .filter((id) => id !== undefined && id !== null);
+        if (tabsToGroup.length === 0) {
+            continue; // e.g. all of this group's tabs were dedupe-skipped
         }
         const updateProperties = {
             collapsed: chromeGroup.collapsed,
             color: chromeGroup.color,
             title: chromeGroup.title
         };
-        if (tabsToGroup && tabsToGroup.length > 0) {
-            browser.tabs.group(groupProperties).then((groupId) => {
-                browser.tabGroups.update(groupId, updateProperties)
-            });
+        try {
+            const match = existingGroups.find((g) => g.title === chromeGroup.title && g.color === chromeGroup.color);
+            if (match) {
+                await browser.tabs.group({ groupId: match.id, tabIds: tabsToGroup });
+                await browser.tabGroups.update(match.id, updateProperties);
+            } else {
+                const groupId = await browser.tabs.group({
+                    createProperties: { windowId: windowId },
+                    tabIds: tabsToGroup
+                });
+                await browser.tabGroups.update(groupId, updateProperties);
+                existingGroups.push({ id: groupId, ...updateProperties });
+            }
+        } catch (e) {
+            console.error('Failed to apply group settings for group', chromeGroup.title, e);
         }
-    });
+    }
 }
 
 // ─── Smart Organize: apply + undo ────────────────────────────────────────────
@@ -1676,8 +1826,57 @@ async function updateLocalDataFromServer(token, force = false, skipLock = false)
     }
 }
 
+// Firefox's identity.getRedirectURL() returns a per-profile
+// https://<uuid>.extensions.allizom.org/ URL that cannot be pre-registered
+// with Google, unlike Chrome's stable *.chromiumapp.org redirect. So on
+// Firefox the flow enters through the Tabox Worker's /auth/start (see
+// createAuthEndpoint below and server/src/authStart.js), Google gets the
+// fixed, registered /auth/callback redirect, and the real per-profile
+// redirect rides in `state`; the Worker's callback 302s back to it with the
+// code (see docs/superpowers/plans/2026-08-06-firefox-port-phase2-oauth.md).
+// Branches ONLY on the getRedirectURL() value (capability/value detection),
+// never on user agent.
+const CHROMIUMAPP_REDIRECT_SUFFIX = '.chromiumapp.org';
+
+function getAuthRedirectConfig() {
+    const dynamicRedirect = browser.identity.getRedirectURL();
+    let hostname = '';
+    try {
+        hostname = new URL(dynamicRedirect).hostname;
+    } catch (error) {
+        hostname = '';
+    }
+    if (hostname.endsWith(CHROMIUMAPP_REDIRECT_SUFFIX)) {
+        return { authRedirect: dynamicRedirect, exchangeRedirect: dynamicRedirect, viaWorker: false };
+    }
+    const workerCallback = `${AUTH_API_BASE}/auth/callback`;
+    return { authRedirect: workerCallback, exchangeRedirect: workerCallback, viaWorker: true, target: dynamicRedirect };
+}
+
+// base64url (no padding) encode/decode of a UTF-8 JSON payload — MUST match
+// the Worker's b64uDecode exactly (server/src/authCallback.js, read-only from
+// the client side): standard base64 with '+'/'/' swapped for '-'/'_' and '='
+// padding stripped.
+// btoa/atob only handle byte strings (char codes 0-255), so UTF-8 bytes are
+// packed into/out of a binary string via the classic encodeURIComponent/
+// escape roundtrip rather than TextEncoder/TextDecoder — the latter aren't
+// available in every environment this code runs under (e.g. this project's
+// jsdom-based Jest tests), while btoa/atob are universal (SW, browser, jsdom).
+function base64UrlEncodeJson(obj) {
+    const json = JSON.stringify(obj);
+    const binary = unescape(encodeURIComponent(json));
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function base64UrlDecodeJson(str) {
+    const padded = String(str).replace(/-/g, '+').replace(/_/g, '/');
+    const binary = atob(padded + '='.repeat((4 - (padded.length % 4)) % 4));
+    const json = decodeURIComponent(escape(binary));
+    return JSON.parse(json);
+}
+
 async function getTokens(code) {
-    const redirectURL = browser.identity.getRedirectURL();
+    const { exchangeRedirect } = getAuthRedirectConfig();
     const options = {
         method: 'POST',
         headers: {
@@ -1686,7 +1885,7 @@ async function getTokens(code) {
         body: JSON.stringify({
             grant_type: 'authorization_code',
             code: code,
-            redirect_uri: redirectURL,
+            redirect_uri: exchangeRedirect,
         })
     }
     // The code→token exchange runs on the Tabox Worker, which holds the OAuth
@@ -1712,19 +1911,43 @@ async function getTokens(code) {
     }
 }
 
-function createAuthEndpoint() {
-    const redirectURL = browser.identity.getRedirectURL();
-    const { oauth2 } = browser.runtime.getManifest();
-    const clientId = oauth2.client_id;
-    const authParams = new URLSearchParams({
-        client_id: clientId,
+function createAuthEndpoint(nonce) {
+    const { authRedirect, viaWorker, target } = getAuthRedirectConfig();
+    // OAuth client config lives in pro-config.js (loaded before this file in
+    // both the Chrome SW importScripts order and the Firefox manifest
+    // background.scripts order) — NOT in the manifest: Firefox has no oauth2 key.
+    const authParamsInit = {
+        client_id: OAUTH_CLIENT_ID,
         response_type: 'code',
         access_type: 'offline',
-        redirect_uri: redirectURL,
+        redirect_uri: authRedirect,
         prompt: 'consent',
-        scope: 'openid ' + oauth2.scopes.join(' '),
+        scope: 'openid ' + OAUTH_SCOPES.join(' '),
+    };
+    // Chrome/Edge (*.chromiumapp.org, pre-registered with Google): EXACT
+    // current behavior, byte-identical auth URL — no `state` param, same
+    // param order (tests/oauthConfig.test.js pins this).
+    if (!viaWorker) {
+        const authParams = new URLSearchParams(authParamsInit);
+        return `https://accounts.google.com/o/oauth2/v2/auth?${authParams.toString()}`;
+    }
+    // Firefox (and any other non-chromiumapp redirect): Firefox's
+    // launchWebAuthFlow validates the `redirect_uri` query param of the URL
+    // it is given against identity.getRedirectURL() and rejects everything
+    // else with "redirect_uri not allowed" BEFORE opening any window — so
+    // Google's auth endpoint (which needs the registered Worker callback as
+    // redirect_uri) can't be passed to it directly. Instead the flow starts
+    // at the Worker's /auth/start with redirect_uri = the per-profile
+    // allizom URL (satisfying Firefox's validator); the Worker 302s to
+    // Google with its registered /auth/callback, which later 302s back to
+    // the allizom target packed into `state` — the navigation
+    // launchWebAuthFlow intercepts. The per-attempt CSRF nonce also rides
+    // in `state`; the client verifies `n` before trusting the returned code.
+    const authParams = new URLSearchParams({
+        redirect_uri: target,
+        state: base64UrlEncodeJson({ t: target, n: nonce }),
     });
-    return `https://accounts.google.com/o/oauth2/v2/auth?${authParams.toString()}`;
+    return `${AUTH_API_BASE}/auth/start?${authParams.toString()}`;
 }
 
 // Shared UID generator - SYNCHRONIZED WITH app/utils/sharedConstants.js
@@ -1884,15 +2107,35 @@ async function syncData(token) {
         // Check for potential conflicts
         const timeDifference = Math.abs(serverTimestamp - localTimestamp);
         const isConflict = timeDifference < 60000; // Within 1 minute might be conflict
-        
+
+        // Issue #67: a device that has never completed a sync against this Drive file
+        // must not resolve sync by raw timestamp comparison. localTimestamp is stamped
+        // on every save even while logged out, so a fresh device with a few offline
+        // collections looks "newer" than the whole account and — outside the 60s
+        // conflict window — used to wholesale-overwrite the Drive file (wiping every
+        // other device on their next pull), or, in the other direction, plain-download
+        // and drop its local-only collections as stale keys. First sync always merges.
+        const { lastSuccessfulSyncTime } = await browser.storage.local.get('lastSuccessfulSyncTime');
+        const isFirstSyncOnThisDevice = !lastSuccessfulSyncTime;
+
         if (serverTimestamp > localTimestamp) {
-            logSyncOperation('info', 'Remote data is newer, updating local', { 
-                serverTimestamp, 
+            logSyncOperation('info', 'Remote data is newer, updating local', {
+                serverTimestamp,
                 localTimestamp,
-                isConflict 
+                isConflict,
+                isFirstSyncOnThisDevice
             });
-            
-            if (isConflict) {
+
+            // First sync with local data present: merge instead of a plain download,
+            // which would remove local-only collections as stale keys (issue #67).
+            let forceFirstSyncMerge = false;
+            if (!isConflict && isFirstSyncOnThisDevice) {
+                const localCollections = (await loadAllCollectionsBG(true)) || [];
+                const localFolders = (await loadAllFoldersBG()) || [];
+                forceFirstSyncMerge = (localCollections.length + localFolders.length) > 0;
+            }
+
+            if (isConflict || forceFirstSyncMerge) {
                 // Potential conflict - create additional backup
                 await createPreSyncBackup('conflict-before-remote-update');
 
@@ -1910,7 +2153,10 @@ async function syncData(token) {
                 localSyncData.timestamp = localTimestamp;
                 const mergedSyncData = mergeSyncSnapshots({
                     localSnapshot: localSyncData,
-                    remoteSnapshot: remoteSyncData
+                    remoteSnapshot: remoteSyncData,
+                    // A first sync can't have implicitly deleted remote entities it
+                    // has never seen — keep every remote-only entity (issue #67).
+                    disableImplicitLocalDeletions: isFirstSyncOnThisDevice
                 });
                 mergedSyncData.timestamp = Date.now();
 
@@ -1993,10 +2239,14 @@ async function syncData(token) {
                 localCollectionCount: nonSharedCollectionCount,
                 nonSharedFolderCount,
                 sharedCollectionCount,
-                isConflict
+                isConflict,
+                isFirstSyncOnThisDevice
             });
-            
-            if (isConflict) {
+
+            // First sync on this device: never wholesale-overwrite the account's Drive
+            // file based on the local timestamp alone — merge with the remote snapshot
+            // so other devices' collections survive (issue #67).
+            if (isConflict || isFirstSyncOnThisDevice) {
                 // Potential conflict - create additional backup
                 await createPreSyncBackup('conflict-before-local-update');
 
@@ -2014,7 +2264,10 @@ async function syncData(token) {
                 localSyncData.timestamp = localTimestamp;
                 const mergedSyncData = mergeSyncSnapshots({
                     localSnapshot: localSyncData,
-                    remoteSnapshot: remoteSyncData
+                    remoteSnapshot: remoteSyncData,
+                    // A first sync can't have implicitly deleted remote entities it
+                    // has never seen — keep every remote-only entity (issue #67).
+                    disableImplicitLocalDeletions: isFirstSyncOnThisDevice
                 });
                 mergedSyncData.timestamp = Date.now();
 
@@ -2402,9 +2655,13 @@ const backgroundUtilsApi = {
     prepareSyncDataForUpload,
     getNewAccessToken,
     getTokens,
+    getAuthRedirectConfig,
+    base64UrlEncodeJson,
+    base64UrlDecodeJson,
     validateToken,
     getAuthToken,
     getAuthTokenForAI,
+    createAuthEndpoint,
     getGoogleUser,
     getOrCreateSyncFile,
     updateRemote,
@@ -2419,6 +2676,13 @@ const backgroundUtilsApi = {
     applySmartOrganizePlan,
     undoSmartOrganize,
     readWindowForAI,
+    CONTEXT_MENU_DEBOUNCE_MS,
+    buildContextMenuModel,
+    resolveContextMenuClick,
+    handleContextMenuClickBG,
+    handleContextMenuCreation,
+    handleMenuStorageChanged,
+    applyChromeGroupSettings,
 };
 
 if (typeof globalThis !== 'undefined') {

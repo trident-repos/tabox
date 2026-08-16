@@ -1,4 +1,5 @@
 import { test, expect } from 'crxbox';
+import { NO_ONBOARDING, seedStorage } from './support/fixtures.mjs';
 
 // E2E: drag-and-drop a collection in the popup list to change its position.
 //
@@ -44,6 +45,14 @@ const indexEntry = (name, order) => ({
 });
 
 const SEED = {
+  // Every test launches a fresh browser, so the SW's onInstalled fires each time and
+  // its `onboardingEligible: true` write races crxbox's storage reset + this seed.
+  // Under full-suite load it lands AFTER the seed, and without these flags the
+  // onboarding overlay renders over the popup and swallows the drag's pointerdown
+  // (dnd-kit never activates → silent no-op). NO_ONBOARDING seeds
+  // onboardingCompleted: true, which suppresses the overlay regardless of when the
+  // late eligible write lands.
+  ...NO_ONBOARDING,
   collections_index: {
     'col-a': indexEntry('Alpha', 0),
     'col-b': indexEntry('Beta', 1),
@@ -63,7 +72,7 @@ const uidOrder = (page) =>
     .evaluateAll((els) => els.map((el) => el.getAttribute('data-collection-uid')));
 
 test('drag-and-drop reorders a collection in the popup list', async ({ ext }) => {
-  await ext.storage.local.set(SEED);
+  await seedStorage(ext, SEED);
 
   const popup = await ext.popup.open();
 

@@ -1,11 +1,11 @@
 import { test, expect } from 'crxbox';
-import { buildSeed, openFullPage } from './support/fixtures.mjs';
+import { buildSeed, openFullPage, seedStorage } from './support/fixtures.mjs';
 
 // Full-page "create folder" flow: sidebar + button → CreateFolderModal → addFolder →
 // createFolder writes folder_<uid> and updates folders_index.
 
 test('creates a new folder from the sidebar', async ({ ext, context }) => {
-  await ext.storage.local.set(buildSeed({ folders: [{ uid: 'f1', name: 'Work', order: 0 }] }));
+  await seedStorage(ext, buildSeed({ folders: [{ uid: 'f1', name: 'Work', order: 0 }] }));
   const page = await openFullPage(ext);
 
   await expect(page.locator('[data-sidebar-folder-uid]')).toHaveCount(1);

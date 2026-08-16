@@ -98,7 +98,7 @@ describe('useCollectionOperations', () => {
         jest.useRealTimers();
     });
 
-    test('opens a collection in the current window and updates lastOpened', async () => {
+    test('opens a collection in the current window; lastOpened is stamped by the background', async () => {
         browser.storage.local.get.mockResolvedValue({ chkOpenNewWindow: false });
         browser.runtime.sendMessage.mockResolvedValue({ ok: true });
         const updateCollection = jest.fn(async () => true);
@@ -118,15 +118,38 @@ describe('useCollectionOperations', () => {
             collection,
             newWindow: false,
         }));
-        expect(updateCollection).toHaveBeenCalledWith(expect.objectContaining({
-            uid: 'collection-1',
-            lastOpened: expect.any(Number),
-        }));
+        // `lastOpened` is stamped background-side (background openTabs handler,
+        // see tests/backgroundOpenTabsLastOpened.test.js) - the popup no longer
+        // bumps it itself, so the frontend `updateCollection` is not called here.
+        expect(updateCollection).not.toHaveBeenCalled();
     });
 
-    test('falls back from incognito window creation and shows informational toasts', async () => {
-        // The fallback path intentionally warns when the incognito window fails.
-        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    test('sends createWindowSpec (not a pre-created window) for the new-window path, so a window-stealing focus event on Firefox cannot orphan it', async () => {
+        browser.storage.local.get.mockResolvedValue({ chkOpenNewWindow: true });
+        browser.runtime.sendMessage.mockResolvedValue({ ok: true });
+
+        await openCollectionTabs({
+            collectionToOpen: collection,
+            updateCollection: jest.fn(async () => true),
+        });
+
+        // The popup must never call windows.create itself for the new-window path -
+        // that create+focus call is what tears the popup down on Firefox before it
+        // can send the openTabs message. Window creation now happens in the
+        // background, driven by the createWindowSpec below.
+        expect(browser.windows.create).not.toHaveBeenCalled();
+        expect(browser.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'openTabs',
+            collection,
+            newWindow: true,
+            createWindowSpec: expect.objectContaining({ focused: true }),
+        }));
+        expect(browser.runtime.sendMessage).not.toHaveBeenCalledWith(
+            expect.objectContaining({ window: expect.anything() }),
+        );
+    });
+
+    test('falls back from incognito window creation and shows informational toasts (fallback now happens in the background)', async () => {
         browser.storage.local.get.mockResolvedValue({ chkOpenNewWindow: true });
         browser.runtime.sendMessage
             .mockResolvedValueOnce({ allowed: true })
@@ -136,9 +159,6 @@ describe('useCollectionOperations', () => {
                 isIncognitoWindow: false,
                 skippedForIncognito: 2,
             });
-        browser.windows.create
-            .mockRejectedValueOnce(new Error('incognito blocked'))
-            .mockResolvedValueOnce({ id: 88, tabs: [{ id: 2, url: 'about:blank' }] });
 
         await openCollectionTabs({
             collectionToOpen: {
@@ -149,17 +169,21 @@ describe('useCollectionOperations', () => {
         });
 
         expect(browser.runtime.sendMessage).toHaveBeenNthCalledWith(1, { type: 'checkIncognitoAccess' });
-        expect(browser.windows.create).toHaveBeenCalledTimes(2);
+        // The popup itself no longer touches windows.create for the new-window
+        // path - it just tells the background to try incognito via
+        // createWindowSpec.incognito. The actual create-with-fallback (and its
+        // console.warn) is exercised by the background test suite - see
+        // tests/backgroundOpenTabsCreateWindowSpec.test.js.
+        expect(browser.windows.create).not.toHaveBeenCalled();
+        expect(browser.runtime.sendMessage).toHaveBeenNthCalledWith(2, expect.objectContaining({
+            type: 'openTabs',
+            createWindowSpec: expect.objectContaining({ incognito: true }),
+        }));
         expect(toastHelpers.showInfoToast).toHaveBeenCalledWith(
             expect.stringContaining('Opened in normal window'),
             4000,
         );
         expect(toastHelpers.showInfoToast).toHaveBeenCalledWith('2 tab(s) skipped - not allowed in incognito', 4000);
-        expect(warnSpy).toHaveBeenCalledWith(
-            expect.stringContaining('Failed to create incognito window'),
-            expect.any(Error),
-        );
-        warnSpy.mockRestore();
     });
 
     test('deletes a collection, updates folder counts, and wires undo data', async () => {
@@ -287,6 +311,12 @@ describe('useCollectionOperations', () => {
         browser.storage.local.get.mockResolvedValue({
             collectionsToTrack: [{ collectionUid: 'collection-1', windowId: 88 }],
         });
+        // The tracked window still holds one of the collection's tabs, so the
+        // staleness guard (issue #90) lets the focus path proceed.
+        browser.windows.get.mockResolvedValue({
+            id: 88,
+            tabs: [{ id: 5, url: 'https://example.com' }],
+        });
 
         renderWithProviders(
             <HookHarness
@@ -306,6 +336,38 @@ describe('useCollectionOperations', () => {
         expect(updateCollection).toHaveBeenCalledWith(expect.objectContaining({
             uid: 'collection-1',
             lastOpened: expect.any(Number),
+        }));
+    });
+
+    test('reopens instead of focusing when the tracked window no longer holds the collection tabs (issue #90)', async () => {
+        const updateCollection = jest.fn(async () => true);
+        browser.storage.local.get.mockResolvedValue({
+            collectionsToTrack: [{ collectionUid: 'collection-1', windowId: 88 }],
+        });
+        // Tracked window still exists but the collection's tabs were all closed.
+        browser.windows.get.mockResolvedValue({ id: 88, tabs: [{ id: 5, url: 'chrome://newtab/' }] });
+        browser.runtime.sendMessage.mockResolvedValue({ ok: true });
+
+        renderWithProviders(
+            <HookHarness
+                collection={collection}
+                updateCollection={updateCollection}
+            />,
+        );
+
+        await act(async () => {
+            await latestOperations._handleFocusWindow();
+        });
+
+        // The stale tracking entry is dropped...
+        expect(browser.storage.local.set).toHaveBeenCalledWith({ collectionsToTrack: [] });
+        // ...and the collection actually opens instead of a silent focus no-op.
+        expect(browser.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'openTabs',
+            collection: expect.objectContaining({ uid: 'collection-1' }),
+        }));
+        expect(browser.runtime.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({
+            type: 'focusWindow',
         }));
     });
 

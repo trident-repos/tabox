@@ -1,0 +1,36 @@
+Tabox — Source-Available License
+
+Copyright (c) 2021-2026 Gil Goldstein. All rights reserved.
+
+The source code in this repository is made available for transparency,
+security review, and browser-extension store source verification (for
+example, review by Mozilla Add-ons reviewers).
+
+Permission is granted to:
+
+1. View, read, and study the source code.
+2. Build the extension locally from this source for personal, private,
+   non-commercial evaluation and for store review verification.
+3. Fork this repository on GitHub solely for the purpose of submitting
+   contributions (pull requests) back to this repository.
+
+Permission is NOT granted to:
+
+1. Redistribute this software or derivative works, in source or binary
+   form, including publishing it (or a modified version) to any browser
+   extension store or software marketplace.
+2. Use the source code, in whole or in part, in other software or
+   commercial products.
+3. Use the "Tabox" name, logo, or branding in derivative works.
+
+By submitting a contribution (pull request) to this repository, you agree
+that your contribution is licensed to the copyright holder under these
+terms and may be distributed as part of the official Tabox releases.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF
+OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

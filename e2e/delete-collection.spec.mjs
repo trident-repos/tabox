@@ -1,4 +1,5 @@
 import { test, expect } from 'crxbox';
+import { NO_ONBOARDING, seedStorage } from './support/fixtures.mjs';
 
 // E2E: delete a collection from the popup list via its row menu.
 //   row .menu-icon (ContextMenu trigger) → "Delete Collection" item → _handleDelete
@@ -40,7 +41,8 @@ async function deleteCollection(popup, uid) {
 }
 
 test('deletes a collection and removes it from storage', async ({ ext }) => {
-  await ext.storage.local.set({
+  await seedStorage(ext, {
+    ...NO_ONBOARDING,
     collections_index: { 'col-a': indexEntry('Alpha'), 'col-b': indexEntry('Beta') },
     'collection_col-a': collection('col-a', 'Alpha'),
     'collection_col-b': collection('col-b', 'Beta'),
@@ -68,7 +70,8 @@ test('deletes a collection and removes it from storage', async ({ ext }) => {
 });
 
 test('deleting the only collection empties the index', async ({ ext }) => {
-  await ext.storage.local.set({
+  await seedStorage(ext, {
+    ...NO_ONBOARDING,
     collections_index: { 'col-a': indexEntry('Alpha') },
     'collection_col-a': collection('col-a', 'Alpha'),
   });

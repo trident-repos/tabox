@@ -1,5 +1,5 @@
 import { test, expect } from 'crxbox';
-import { buildSeed, openFullPage, tab } from './support/fixtures.mjs';
+import { buildSeed, openFullPage, tab, seedStorage } from './support/fixtures.mjs';
 import { startDrag, dragOver, drop } from './support/dnd.mjs';
 
 // Coverage for the UNIFIED full-page drag-and-drop UX (v4.1.2):
@@ -65,7 +65,7 @@ const resolveAccent = (page) =>
 // --- 1. theme-adaptive accent tokens ----------------------------------------
 
 test('drop indicators derive from the shared accent token in both themes', async ({ ext }) => {
-  await ext.storage.local.set({
+  await seedStorage(ext, {
     ...buildSeed({
       collections: [
         { uid: 'col-a', name: 'Alpha', order: 0 },
@@ -124,7 +124,7 @@ test('drop indicators derive from the shared accent token in both themes', async
 // --- 2. shared drag overlay across all three surfaces ------------------------
 
 test('card, tab, and group drags all use the shared drag overlay treatment', async ({ ext }) => {
-  await ext.storage.local.set(
+  await seedStorage(ext,
     buildSeed({
       collections: [
         {
@@ -176,7 +176,7 @@ test('card, tab, and group drags all use the shared drag overlay treatment', asy
 // --- 3. settle flash on drop -------------------------------------------------
 
 test('dropped tab gets a settle flash', async ({ ext }) => {
-  await ext.storage.local.set(
+  await seedStorage(ext,
     buildSeed({
       collections: [
         {
@@ -209,7 +209,7 @@ test('dropped tab gets a settle flash', async ({ ext }) => {
 // --- 4. unified 5px activation distance --------------------------------------
 
 test('folder reorder activates at the unified 5px distance', async ({ ext }) => {
-  await ext.storage.local.set(
+  await seedStorage(ext,
     buildSeed({
       folders: [
         { uid: 'f1', name: 'Work', order: 0 },
@@ -239,7 +239,7 @@ test('folder reorder activates at the unified 5px distance', async ({ ext }) => 
 // --- 5. indicator gating ------------------------------------------------------
 
 test('indicator gating: no-op targets show nothing, valid containers show ambient cues', async ({ ext }) => {
-  await ext.storage.local.set(
+  await seedStorage(ext,
     buildSeed({
       collections: [{ uid: 'col-a', name: 'Alpha', order: 0, parentId: 'f1' }],
       folders: [
@@ -271,7 +271,7 @@ test('indicator gating: no-op targets show nothing, valid containers show ambien
   // A root-level collection must not light up Root Level (already there → no-op).
   // Clear first so the previous seed's unindexed blobs can't trip orphan recovery.
   await ext.storage.local.clear();
-  await ext.storage.local.set(
+  await seedStorage(ext,
     buildSeed({
       collections: [{ uid: 'col-r', name: 'Rooty', order: 0 }],
       folders: [{ uid: 'f1', name: 'Work', order: 0 }],
@@ -293,7 +293,7 @@ test('indicator gating: no-op targets show nothing, valid containers show ambien
 // --- 6. suppressed no-op hover must not fall back to a stale target -----------
 
 test('dropping on a suppressed no-op target does not move the collection', async ({ ext }) => {
-  await ext.storage.local.set({
+  await seedStorage(ext, {
     ...buildSeed({
       collections: [
         { uid: 'col-a', name: 'Alpha', order: 0 },

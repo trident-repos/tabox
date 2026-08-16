@@ -1,15 +1,15 @@
 import { test, expect } from 'crxbox';
+import { NO_ONBOARDING, seedStorage } from './support/fixtures.mjs';
 
-// E2E: Settings → "Sync Debug & Recovery" → Restore an auto backup → collections updated.
+// E2E: Settings modal → "Recovery" section → Restore an auto backup → collections updated.
 //
 // Flow (verified against the source):
-//  - The popup's "Sync Debug & Recovery" button only renders when logged into sync
-//    (`isVisible: isLoggedIn`, app/SettingsMenu.js). `isLoggedIn` is derived from the
-//    cached `syncSessionState` (app/App.js checkSyncStatus → isSyncSessionEnabled), so we
-//    seed `syncSessionState.isEnabled = true` to boot the popup "logged in".
-//  - The Recovery settings panel lists `autoBackups` and renders a Restore action per backup.
-//  - Restore → `recoverFromBackup` message → the background overwrite path restores the
-//    backup's collections and folders into indexed storage while preserving collection UIDs.
+//  - The Recovery section (SyncDebugRecoveryPanel mode="recovery") renders in the
+//    settings modal for every user — no sync login required.
+//  - It lists `autoBackups` (grouped under "Auto Backups") with a Restore action per backup.
+//  - Restore asks for confirmation via native confirm(), then sends
+//    `restoreBackupSelection` (mode: overwrite) — the background restores the backup's
+//    collections into indexed storage while keeping unrelated current items untouched.
 
 const T = 1_710_000_000_000;
 
@@ -27,17 +27,7 @@ const indexEntry = (name, color, tabCount) => ({
 });
 
 const SEED = {
-  // Make the popup boot "logged in" so the Sync Debug & Recovery item is rendered.
-  // isEnabled:true short-circuits isSyncSessionEnabled; hasRefreshToken:false makes
-  // checkSyncStatus skip the background re-check that could flip it back.
-  syncSessionState: {
-    isEnabled: true,
-    status: 'active',
-    user: { email: 'tester@example.com' },
-    hasRefreshToken: false,
-    error: null,
-    lastCheckedAt: 0,
-  },
+  ...NO_ONBOARDING,
 
   // Initial collections (the "before" state).
   collections_index: {
@@ -103,7 +93,7 @@ const SEED = {
 };
 
 test('restoring an auto backup updates the stored collections', async ({ ext }) => {
-  await ext.storage.local.set(SEED);
+  await seedStorage(ext, SEED);
 
   const popup = await ext.popup.open();
 
@@ -114,20 +104,22 @@ test('restoring an auto backup updates the stored collections', async ({ ext }) 
   );
   expect(Object.keys(indexBefore)).not.toContain('col-restore-1');
 
-  // Open Settings.
+  // Open Settings modal → "Recovery" section.
   await popup.locator('.settings-button').click();
-  await expect(popup.locator('.custom-drawer.open')).toBeVisible();
+  await expect(popup.locator('.fp-settings-modal')).toBeVisible();
+  await popup.locator('.fp-settings-sidebar-item', { hasText: 'Recovery' }).click();
 
-  // Open "Sync Debug & Recovery" (visible only because we seeded a logged-in session).
-  await popup.getByRole('button', { name: 'Sync Debug & Recovery' }).click();
-
-  // The modal lists the seeded auto backup with a Restore button. Scope to the
+  // The panel lists the seeded auto backup with a Restore button. Scope to the
   // "Auto Backups" group so we don't accidentally match a pre-sync/version restore.
   const autoGroup = popup
-    .locator('.sync-debug-backup-group')
+    .locator('.sync-recovery-backup-group')
     .filter({ hasText: 'Auto Backups' });
-  const restoreButton = autoGroup.getByRole('button', { name: 'Restore' });
+  const restoreButton = autoGroup.getByRole('button', { name: /^Restore backup/ });
   await expect(restoreButton).toBeVisible();
+
+  // Restore asks for confirmation via a native confirm() dialog — accept it
+  // (Playwright dismisses dialogs by default, which would cancel the restore).
+  popup.once('dialog', (dialog) => dialog.accept());
   await restoreButton.click();
 
   // The restore round-trips through the service worker and writes asynchronously,

@@ -22,6 +22,7 @@ import { createFolderMenuItems } from '../utils/contextMenuItems';
 import FPCtxMenu from './FPCtxMenu';
 import { isSharedFolder } from '../utils/sharedFolderUtils';
 import { respondToSharedInvite } from '../utils/sharedFolderActions';
+import { getDisplayInfo } from '../utils/displayInfo';
 import {
     duplicateFolder,
     deleteFolder,
@@ -348,7 +349,7 @@ function FPSidebar({
             const openedCollections = [];
             const failedCollections = [];
 
-            const displays = await browser.system.display.getInfo();
+            const displays = await getDisplayInfo();
 
             for (const collection of collectionsToOpen) {
                 try {
@@ -382,23 +383,36 @@ function FPSidebar({
                         }
                     }
 
-                    const win = await browser.windows.create(windowCreationObject);
+                    // Send createWindowSpec (not a pre-created window) so the background
+                    // creates the window and opens the tabs atomically - on Firefox,
+                    // focusing a brand-new window destroys this popup/full-page document
+                    // immediately, so any code after `windows.create()` (including the
+                    // old `sendMessage` call) would never run, leaving a blank window.
+                    // NOTE: for multi-collection loops like this one, the popup may still
+                    // die on Firefox right after the FIRST window opens. The remaining
+                    // collections still open correctly (the work is driven by background
+                    // messages), but this loop's own bookkeeping
+                    // (openedCollections/failedCollections below) may not run to
+                    // completion. Acceptable for now - Chrome is unaffected.
+                    // `newWindow` is intentionally omitted: openTabs() in the background
+                    // only bypasses its chkIgnoreDuplicates storage lookup when
+                    // `newWindow` is truthy, so sending `true` here would silently
+                    // disable the user's "ignore duplicates" setting for this path.
                     await browser.runtime.sendMessage({
                         type: 'openTabs',
                         collection,
-                        window: win,
+                        createWindowSpec: windowCreationObject,
                     });
-                    openedCollections.push({ ...collection, lastOpened: Date.now() });
+                    // Don't stamp/persist lastOpened here - the background's
+                    // markCollectionOpenedBG already stamps it authoritatively.
+                    // A popup-side write here would double-stamp on Chrome and,
+                    // being a full-object overwrite, could clobber a concurrent
+                    // background auto-update save. The UI picks up the change via
+                    // storage.onChanged, same as the single-open path.
+                    openedCollections.push(collection);
                 } catch {
                     failedCollections.push(collection.name);
                 }
-            }
-
-            if (openedCollections.length > 0) {
-                try {
-                    const { batchUpdateCollections } = await import('../utils/storageUtils');
-                    await batchUpdateCollections(openedCollections);
-                } catch { /* silent */ }
             }
 
             if (failedCollections.length > 0) {

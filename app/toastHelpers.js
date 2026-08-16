@@ -96,7 +96,7 @@ export const showSuccessToast = (message, duration = 3000, options = {}) => {
  * @param {string} message - Message to display
  * @param {number} duration - Duration in ms (default 4000)
  */
-export const showInfoToast = (message, duration = 4000) => {
+export const showInfoToast = (message, duration = 4000, options = {}) => {
     enforceToastLimit();
 
     const position = getPosition();
@@ -105,6 +105,8 @@ export const showInfoToast = (message, duration = 4000) => {
         position,
         variant: 'info',
         message,
+        title: options.title,
+        actions: options.actions,
     });
 
     trackToast(toastId);

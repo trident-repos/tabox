@@ -1,5 +1,5 @@
 import { test, expect } from 'crxbox';
-import { buildSeed, openFullPage, tab } from './support/fixtures.mjs';
+import { buildSeed, openFullPage, tab, seedStorage } from './support/fixtures.mjs';
 import { startDrag, dragOver, drop } from './support/dnd.mjs';
 
 // Baseline coverage for the CURRENT full-page drag-and-drop behavior, pinned
@@ -90,7 +90,7 @@ const storedTabs = async (ext, uid) => {
 // --- 1. card → sidebar folder ----------------------------------------------
 
 test('dragging a card over a sidebar folder highlights it and drop moves the collection', async ({ ext }) => {
-  await ext.storage.local.set(
+  await seedStorage(ext,
     buildSeed({
       collections: [{ uid: 'col-a', name: 'Alpha', order: 0 }],
       folders: [{ uid: 'f1', name: 'Work', order: 0 }],
@@ -116,7 +116,7 @@ test('dragging a card over a sidebar folder highlights it and drop moves the col
 // --- 2. list-mode reorder with insert-gap preview ---------------------------
 
 test('list mode shows an insert gap while dragging and drop reorders within the section', async ({ ext }) => {
-  await ext.storage.local.set({
+  await seedStorage(ext, {
     ...buildSeed({
       collections: [
         { uid: 'col-a', name: 'Alpha', order: 0 },
@@ -150,7 +150,7 @@ test('list mode shows an insert gap while dragging and drop reorders within the 
 // --- 3. card → empty folder dropzone ----------------------------------------
 
 test('dropping a card on an empty folder section moves it into the folder', async ({ ext }) => {
-  await ext.storage.local.set(
+  await seedStorage(ext,
     buildSeed({
       collections: [{ uid: 'col-a', name: 'Alpha', order: 0 }],
       folders: [{ uid: 'f1', name: 'Work', order: 0 }],
@@ -176,7 +176,7 @@ test('dropping a card on an empty folder section moves it into the folder', asyn
 // --- 4. tab reorder inside the detail panel ---------------------------------
 
 test('reorders tabs inside the collection detail panel', async ({ ext }) => {
-  await ext.storage.local.set(seedWithTabs());
+  await seedStorage(ext, seedWithTabs());
   const page = await openFullPage(ext);
   const panel = await openDetailPanel(page, 'col-a');
 
@@ -195,7 +195,7 @@ test('reorders tabs inside the collection detail panel', async ({ ext }) => {
 // --- 5. ungrouped tab → into a group ----------------------------------------
 
 test('drags an ungrouped tab into a tab group', async ({ ext }) => {
-  await ext.storage.local.set(seedWithGroup());
+  await seedStorage(ext, seedWithGroup());
   const page = await openFullPage(ext);
   const panel = await openDetailPanel(page, 'col-a');
 
@@ -220,7 +220,7 @@ test('drags an ungrouped tab into a tab group', async ({ ext }) => {
 // --- 6. grouped tab → out of the group via the end edge zone ----------------
 
 test('drags a grouped tab out of its group to the collection end', async ({ ext }) => {
-  await ext.storage.local.set(seedWithGroup());
+  await seedStorage(ext, seedWithGroup());
   const page = await openFullPage(ext);
   const panel = await openDetailPanel(page, 'col-a');
 
@@ -246,7 +246,7 @@ test('drags a grouped tab out of its group to the collection end', async ({ ext 
 // --- 7. whole group reorder below an ungrouped tab --------------------------
 
 test('drags a whole tab group below an ungrouped tab', async ({ ext }) => {
-  await ext.storage.local.set(seedWithGroup());
+  await seedStorage(ext, seedWithGroup());
   const page = await openFullPage(ext);
   const panel = await openDetailPanel(page, 'col-a');
 
@@ -266,7 +266,7 @@ test('drags a whole tab group below an ungrouped tab', async ({ ext }) => {
 // --- 8. tab → another collection card (cross-collection transfer) -----------
 
 test('drags a tab from the detail panel onto another collection card', async ({ ext }) => {
-  await ext.storage.local.set(
+  await seedStorage(ext,
     buildSeed({
       collections: [
         { uid: 'col-a', name: 'Alpha', order: 0, tabs: [tab('tab-1', 'One'), tab('tab-2', 'Two')] },
@@ -305,7 +305,7 @@ test('drags a tab from the detail panel onto another collection card', async ({ 
 // --- 9. card → folder section header in the content area --------------------
 
 test('drops a collection card onto another folder section header in the content area', async ({ ext }) => {
-  await ext.storage.local.set(
+  await seedStorage(ext,
     buildSeed({
       collections: [
         { uid: 'col-a', name: 'Alpha', order: 0 },

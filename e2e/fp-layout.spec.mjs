@@ -1,5 +1,5 @@
 import { test, expect } from 'crxbox';
-import { buildSeed, openFullPage } from './support/fixtures.mjs';
+import { buildSeed, openFullPage, seedStorage } from './support/fixtures.mjs';
 
 // Full-page view: rendering + search filtering (FPTopBar / FPContentArea / FPSidebar).
 
@@ -16,7 +16,7 @@ const SEED = buildSeed({
 });
 
 test('renders collection cards and the folder sidebar', async ({ ext, context }) => {
-  await ext.storage.local.set(SEED);
+  await seedStorage(ext, SEED);
   const page = await openFullPage(ext);
 
   // All three collections render as cards in the default "All Collections" view.
@@ -30,7 +30,7 @@ test('renders collection cards and the folder sidebar', async ({ ext, context })
 });
 
 test('search filters the visible collection cards', async ({ ext, context }) => {
-  await ext.storage.local.set(SEED);
+  await seedStorage(ext, SEED);
   const page = await openFullPage(ext);
   await expect(page.locator('.fp-collection-card')).toHaveCount(3);
 

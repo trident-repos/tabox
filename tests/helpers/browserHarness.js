@@ -247,7 +247,8 @@ const createBrowserHarness = (options = {}) => {
             removeCachedAuthToken: jest.fn(async () => undefined)
         },
         extension: {
-            isAllowedIncognitoAccess: jest.fn(async () => true)
+            isAllowedIncognitoAccess: jest.fn(async () => true),
+            isAllowedFileSchemeAccess: jest.fn(async () => true)
         },
         system: {
             display: {

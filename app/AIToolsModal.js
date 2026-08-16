@@ -184,6 +184,11 @@ function AIToolsModal({ updateRemoteData, onDataUpdate }) {
         browser.runtime.sendMessage({ type: 'aiWarmup' }).catch(() => {});
     }, [isOpen, setAiProcessingUids, setAiProcessingCurrentUid]);
 
+    // Fire an AI task in the service worker. Returns the promise resolving to the
+    // final aiTaskState; live progress comes via the storage subscription below.
+    // Declared before the effects whose dependency arrays reference it (TDZ).
+    const dispatchAiRun = useCallback((task, params) => browser.runtime.sendMessage({ type: 'aiRun', task, params }), []);
+
     // Context-menu route: when the modal opens with a pre-selected split target,
     // jump straight to the Split Collection tool and kick off the scan once.
     // Declared AFTER the open-reset effect so it runs after the reset clears state.
@@ -240,9 +245,6 @@ function AIToolsModal({ updateRemoteData, onDataUpdate }) {
     }, [setAiProcessingUids, setAiProcessingCurrentUid]);
 
     // ── Shared service-worker plumbing ──────────────────────────────────────
-    // Fire an AI task in the service worker. Returns the promise resolving to the
-    // final aiTaskState; live progress comes via the storage subscription below.
-    const dispatchAiRun = useCallback((task, params) => browser.runtime.sendMessage({ type: 'aiRun', task, params }), []);
     const sendAiCancel = useCallback(() => browser.runtime.sendMessage({ type: 'aiCancel' }), []);
     const sendAiUndo = useCallback(() => browser.runtime.sendMessage({ type: 'aiUndo' }), []);
     // Deterministic post-mutation refresh: reload the modal's own collections

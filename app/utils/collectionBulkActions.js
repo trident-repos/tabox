@@ -1,5 +1,5 @@
 import { browser } from '../../static/globals';
-import { batchUpdateCollections } from './storageUtils';
+import { getDisplayInfo } from './displayInfo';
 
 const hasVisibleIntersection = (targetBounds, displayBounds) => {
     const intersection = {
@@ -49,27 +49,40 @@ const buildWindowCreationObject = (collection, displays = []) => {
 export const openCollectionsInSequence = async (collections = []) => {
     const openedCollections = [];
     const failedCollections = [];
-    const displays = await browser.system.display.getInfo();
+    const displays = await getDisplayInfo();
 
     for (const collection of collections) {
         try {
-            const win = await browser.windows.create(buildWindowCreationObject(collection, displays));
+            // Send createWindowSpec (not a pre-created window) so the background
+            // creates the window and opens the tabs atomically - on Firefox,
+            // focusing a brand-new window destroys the calling document (popup or
+            // full page) immediately, so any code after `windows.create()`
+            // (including the old `sendMessage` call) would never run, leaving a
+            // blank window. NOTE: for this multi-collection loop, the caller may
+            // still die on Firefox right after the FIRST window opens. The
+            // remaining collections still open correctly (the work is driven by
+            // background messages), but this loop's own bookkeeping
+            // (openedCollections/failedCollections) may not run to completion.
+            // Acceptable for now - Chrome is unaffected.
+            // Omit `newWindow` here (unlike the pre-createWindowSpec code, which never
+            // sent it either): openTabs() only bypasses the chkIgnoreDuplicates lookup
+            // when `newWindow` is truthy (background.js `newWindow ?? storage.local.get(...)`),
+            // so passing `true` would skip the user's "ignore duplicates" setting.
             await browser.runtime.sendMessage({
                 type: 'openTabs',
                 collection,
-                window: win,
+                createWindowSpec: buildWindowCreationObject(collection, displays),
             });
-            openedCollections.push({
-                ...collection,
-                lastOpened: Date.now(),
-            });
+            // Don't stamp/persist lastOpened here - openTabs() -> markCollectionOpenedBG()
+            // already stamps it authoritatively in the background. A popup-side
+            // batchUpdateCollections write here would double-stamp on Chrome and, being
+            // a full-object overwrite, could clobber a concurrent background
+            // auto-update write. The UI picks up the change via storage.onChanged,
+            // same as the single-open path (see useCollectionOperations.openCollectionTabs).
+            openedCollections.push(collection);
         } catch {
             failedCollections.push(collection?.name || 'Untitled Collection');
         }
-    }
-
-    if (openedCollections.length > 0) {
-        await batchUpdateCollections(openedCollections);
     }
 
     return {

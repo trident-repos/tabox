@@ -1,5 +1,5 @@
 import { test, expect } from 'crxbox';
-import { T } from './support/fixtures.mjs';
+import { NO_ONBOARDING, T, seedStorage } from './support/fixtures.mjs';
 
 // Probe of crxbox 0.1.0 additions against the two boundaries flagged in the assessment:
 //   §6.5 #1 — a real window seeded with known tabs (ext.windows / ext.tabs)
@@ -25,7 +25,7 @@ test('ext.simulateUpdate unlocks update-gated migration (deferred-URL repair)', 
   // seeding alone can't trigger.
   const real = 'https://real.example.com/page';
   const wrapped = `${ext.url('deferedLoading.html')}?url=${encodeURIComponent(real)}`;
-  await ext.storage.local.set({
+  await seedStorage(ext, {
     collections_index: {
       'col-a': { name: 'Alpha', type: 'collection', tabCount: 1, lastUpdated: T, lastOpened: null, createdOn: T, color: 'blue', size: 0, parentId: null, order: 0 },
     },
@@ -58,6 +58,7 @@ test('save-current-tabs: openInWindow lets the popup capture a seeded window\'s 
   // we can use clean, distinguishable data: URLs here.)
   const tabA = 'data:text/html,<title>Tab A</title>';
   const tabB = 'data:text/html,<title>Tab B</title>';
+  await seedStorage(ext, NO_ONBOARDING);
   const win = await ext.windows.create({ tabs: [tabA, tabB] });
 
   const popup = await ext.popup.openInWindow(win);

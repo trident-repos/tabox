@@ -85,13 +85,17 @@ describe('App command palette open action', () => {
         fireEvent.click(screen.getByTestId('command-palette-open'));
 
         await waitFor(() => {
+            // `updateCollection` is no longer passed - openCollectionTabs relies
+            // solely on the background's authoritative lastOpened stamp now (see
+            // useCollectionOperations.openCollectionTabs), so the dead parameter
+            // was dropped from this call site.
             expect(openCollectionTabs).toHaveBeenCalledWith(expect.objectContaining({
                 collectionToOpen: expect.objectContaining({
                     uid: 'collection-1',
                     name: 'Wix collection'
-                }),
-                updateCollection: expect.any(Function)
+                })
             }));
+            expect(openCollectionTabs.mock.calls[0][0]).not.toHaveProperty('updateCollection');
         });
 
         expect(browser.windows.create).not.toHaveBeenCalled();

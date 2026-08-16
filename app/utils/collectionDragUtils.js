@@ -112,10 +112,13 @@ const withUngroupedTab = (tab) => {
     return updatedTab;
 };
 
+// groupUid is the source of truth for tab↔group membership; groupId is only a
+// legacy Chrome-session id. Never write the uid string into groupId — restore
+// matching would break for collections whose group record has no numeric id.
 const withGroupedTab = (tab, group) => ({
     ...tab,
     groupUid: group.uid,
-    groupId: group.id || group.uid,
+    groupId: typeof group.id === 'number' ? group.id : -1,
 });
 
 export const collectionDropTargetTypes = DROP_TARGET_TYPE;

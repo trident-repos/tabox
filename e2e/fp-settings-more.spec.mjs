@@ -1,5 +1,5 @@
 import { test, expect } from 'crxbox';
-import { buildSeed, openFullPage } from './support/fixtures.mjs';
+import { buildSeed, openFullPage, seedStorage } from './support/fixtures.mjs';
 
 // Batch E — remaining settings toggles + theme persistence.
 
@@ -9,7 +9,7 @@ async function openSettings(page) {
 }
 
 test('Performance Mode toggle persists chkPerformanceMode and adds the body class', async ({ ext, context }) => {
-  await ext.storage.local.set(buildSeed({ collections: [{ uid: 'col-a', name: 'Alpha' }] }));
+  await seedStorage(ext, buildSeed({ collections: [{ uid: 'col-a', name: 'Alpha' }] }));
   const page = await openFullPage(ext);
   await openSettings(page);
 
@@ -21,7 +21,7 @@ test('Performance Mode toggle persists chkPerformanceMode and adds the body clas
 });
 
 test('Toolbar launch mode toggle persists chkToolbarIconOpensFullPage', async ({ ext, context }) => {
-  await ext.storage.local.set(buildSeed({ collections: [{ uid: 'col-a', name: 'Alpha' }] }));
+  await seedStorage(ext, buildSeed({ collections: [{ uid: 'col-a', name: 'Alpha' }] }));
   const page = await openFullPage(ext);
   await openSettings(page);
 
@@ -31,7 +31,7 @@ test('Toolbar launch mode toggle persists chkToolbarIconOpensFullPage', async ({
 });
 
 test('a seeded dark theme persists across load (switch reflects stored state)', async ({ ext, context }) => {
-  await ext.storage.local.set({
+  await seedStorage(ext, {
     ...buildSeed({ collections: [{ uid: 'col-a', name: 'Alpha' }] }),
     theme: 'dark',
     darkModeToggle: true,

@@ -56,6 +56,7 @@ import {
 import { applyFolderCollapsedState, getFolderCollapseStorageKey } from './utils/folderViewState';
 import { openOrFocusFullPageInCurrentWindow } from './utils/openFullPage';
 import { openCollectionTabs } from './useCollectionOperations';
+import { initFileAccessNoticeWatcher } from './utils/fileAccessNotice';
 
 // Folder operations
 import { createFolder } from './utils/folderOperations';
@@ -388,6 +389,26 @@ function App({ mode = 'popup' }) {
     });
   }, [getCurrentCollectionSortOptions, setSettingsData]);
 
+  // Declared before reloadCollectionsAndFoldersFromStorage, whose dependency
+  // array references it (const TDZ — must be initialized first).
+  const refreshLastSyncTimeFromStorage = useCallback(async ({ fallbackToNow = false } = {}) => {
+    const { lastSuccessfulSyncTime } = await browser.storage.local.get('lastSuccessfulSyncTime');
+
+    if (lastSuccessfulSyncTime) {
+      setLastSyncTime(lastSuccessfulSyncTime);
+      return lastSuccessfulSyncTime;
+    }
+
+    if (fallbackToNow) {
+      const now = Date.now();
+      setLastSyncTime(now);
+      return now;
+    }
+
+    setLastSyncTime(null);
+    return null;
+  }, [setLastSyncTime]);
+
   const reloadCollectionsAndFoldersFromStorage = useCallback(async ({ updateSyncTime = false } = {}) => {
     try {
       const { sortBy, sortOrder } = await getCurrentCollectionSortOptions();
@@ -436,24 +457,6 @@ function App({ mode = 'popup' }) {
     setTrackedCollectionUids(new Set((collectionsToTrack || []).map(item => item.collectionUid)));
   }, []);
 
-  const refreshLastSyncTimeFromStorage = useCallback(async ({ fallbackToNow = false } = {}) => {
-    const { lastSuccessfulSyncTime } = await browser.storage.local.get('lastSuccessfulSyncTime');
-
-    if (lastSuccessfulSyncTime) {
-      setLastSyncTime(lastSuccessfulSyncTime);
-      return lastSuccessfulSyncTime;
-    }
-
-    if (fallbackToNow) {
-      const now = Date.now();
-      setLastSyncTime(now);
-      return now;
-    }
-
-    setLastSyncTime(null);
-    return null;
-  }, [setLastSyncTime]);
-  
   const markDataHydrationComplete = useCallback(() => {
     if (!performanceMarksRef.current.data) {
       markPerformancePoint('data-ready');
@@ -1841,6 +1844,13 @@ function App({ mode = 'popup' }) {
     };
   }, [applyCollectionUpdates]);
 
+  // file:// tabs skipped on open: the background persists a pending notice
+  // (fileAccessNoticePending) because the popup is torn down the moment the
+  // opened tabs take focus — a directly-shown toast dies unseen. The watcher
+  // shows it on mount (reopened popup, context-menu/keyboard opens) and live
+  // via storage.onChanged (persistent full-page view). Returns its own cleanup.
+  useEffect(() => initFileAccessNoticeWatcher({ isFullPage }), [isFullPage]);
+
   // Shared folders: keep pendingInvitesState (the invite banner) in sync with
   // storage — load it once on mount, then follow storage.onChanged so an
   // invite that lands while this view is open shows up without a reload.
@@ -2130,8 +2140,7 @@ function App({ mode = 'popup' }) {
     switch (actionId) {
       case 'open': {
         await openCollectionTabs({
-          collectionToOpen: collection,
-          updateCollection
+          collectionToOpen: collection
         });
         break;
       }

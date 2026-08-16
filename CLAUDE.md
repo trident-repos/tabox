@@ -2,7 +2,17 @@
 
 ## Project Overview
 
-Tabox is a Chrome/Edge extension (Manifest v3) for saving open tabs and tab groups into named collections. Users can organize collections into folders, export/import them, and optionally sync across devices via Google Drive.
+Tabox is a browser extension (Manifest v3) for Chromium browsers (Chrome/Edge) **and Firefox**, for saving open tabs and tab groups into named collections. Users can organize collections into folders, export/import them, and optionally sync across devices via Google Drive.
+
+## Browser Support (Chromium + Firefox) — applies to EVERY change
+
+**Any code change must work on both Chromium (Chrome/Edge) and Firefox.** This is a hard requirement, not a nice-to-have. It applies to scripts (popup, service worker/background, content), CSS rendering, manifest changes, and any browser API usage.
+
+- **APIs**: use the `browser.*` namespace via webextension-polyfill, never bare `chrome.*` in new code. Before using any extension API, verify it exists on Firefox (MDN browser-compat) — e.g. `chrome.tabGroups`, `chrome.identity.getAuthToken`, and offscreen documents are Chromium-only or behave differently; gate them with feature detection and provide a Firefox path (e.g. Firefox OAuth goes through `launchWebAuthFlow` bridged by the Worker's `GET /auth/start`).
+- **Background context**: Chromium runs an MV3 service worker; Firefox may run an event page/background script. Don't rely on SW-only globals (`importScripts`, `clients`, etc.) without a Firefox-compatible equivalent or guard.
+- **CSS**: verify rendering in both engines (Blink and Gecko). Avoid Chromium-only features without fallbacks (`-webkit-` prefixed rules need unprefixed/`-moz-` equivalents; check scrollbar styling, `zoom`, popup sizing behavior, and form-control styling which differ in Gecko).
+- **Manifest**: keep Firefox-specific keys (`browser_specific_settings`, background scripts vs service_worker) in mind when touching `manifest.json`.
+- **Verification**: when testing or reasoning about a change, consider both variants; don't declare work complete if it's only been validated against Chromium.
 
 ## Tech Stack
 
@@ -114,7 +124,7 @@ No API keys are bundled with the extension. All secrets (Google OAuth client sec
 ## Important Notes
 
 - The extension bundle carries NO credentials — Google OAuth token exchanges run on the Worker (`POST /auth/token`, wrangler secret `GOOGLE_CLIENT_SECRET`) and CI fails the release if `build/api-keys.json` reappears
-- The extension targets Chrome 89+ (Manifest v3)
+- The extension targets Chrome 89+ (Manifest v3) and Firefox — every change must work on both (see Browser Support section)
 - Webpack splits vendor chunks (React, UI libs, dnd-kit)
 - Release builds strip `console.log` via Terser
 - After any code change, always run `yarn prod` before considering the work complete

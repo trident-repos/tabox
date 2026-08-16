@@ -7,7 +7,7 @@ import { MdDragIndicator, MdContentCopy } from 'react-icons/md';
 import { HiOutlineExternalLink } from 'react-icons/hi';
 import { HiOutlineTrash, HiOutlineArrowRightOnRectangle } from 'react-icons/hi2';
 import { getColorCode } from './utils';
-import { FALLBACK_FAVICON } from './utils/sharedConstants';
+import { FALLBACK_FAVICON, safeFavIconUrl } from './utils/sharedConstants';
 import { copyToClipboard, unwrapDeferredUrl } from './utils/index';
 import { showSuccessToast, showErrorToast } from './toastHelpers';
 import MoveToCollectionModal from './MoveToCollectionModal';
@@ -244,8 +244,12 @@ const TabRow = memo(({
     }), [group]);
 
     const faviconSrc = useMemo(() => {
-        if (tab.favIconUrl) return tab.favIconUrl;
-        if (tab?.url && /\.(jpg|jpeg|gif|png|ico|tiff)$/.test(tab.url.split('?')[0])) return tab.url;
+        const favIcon = safeFavIconUrl(tab.favIconUrl, null);
+        if (favIcon) return favIcon;
+        if (tab?.url && /\.(jpg|jpeg|gif|png|ico|tiff)$/.test(tab.url.split('?')[0])) {
+            const imageUrl = safeFavIconUrl(tab.url, null);
+            if (imageUrl) return imageUrl;
+        }
         return FALLBACK_FAVICON;
     }, [tab.favIconUrl, tab.url]);
 

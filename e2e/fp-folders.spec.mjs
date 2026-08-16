@@ -1,14 +1,13 @@
 import { test, expect } from 'crxbox';
-import { buildSeed, openFullPage } from './support/fixtures.mjs';
+import { buildSeed, clickFolderCtxItem, openFullPage, seedStorage } from './support/fixtures.mjs';
 
 // Batch D — folder operations via the sidebar context menu (right-click → Edit / Delete).
 
 test('renames a folder via Edit Folder', async ({ ext, context }) => {
-  await ext.storage.local.set(buildSeed({ folders: [{ uid: 'f1', name: 'Work', order: 0 }] }));
+  await seedStorage(ext, buildSeed({ folders: [{ uid: 'f1', name: 'Work', order: 0 }] }));
   const page = await openFullPage(ext);
 
-  await page.locator('[data-sidebar-folder-uid="f1"] .fp-sidebar-folder-item').click({ button: 'right' });
-  await page.locator('.fp-sidebar-ctx-item', { hasText: 'Edit Folder' }).click();
+  await clickFolderCtxItem(page, 'f1', 'Edit Folder');
 
   // CreateFolderModal opens in edit mode, pre-filled with the current name.
   const input = page.locator('#folder-name-input');
@@ -23,7 +22,7 @@ test('renames a folder via Edit Folder', async ({ ext, context }) => {
 });
 
 test('deletes an empty folder via Delete Folder', async ({ ext, context }) => {
-  await ext.storage.local.set(
+  await seedStorage(ext,
     buildSeed({
       folders: [
         { uid: 'f1', name: 'Keep', order: 0 },
@@ -35,8 +34,7 @@ test('deletes an empty folder via Delete Folder', async ({ ext, context }) => {
   await expect(page.locator('[data-sidebar-folder-uid]')).toHaveCount(2);
 
   // Deleting an empty folder (collectionCount 0) skips the confirm modal.
-  await page.locator('[data-sidebar-folder-uid="f2"] .fp-sidebar-folder-item').click({ button: 'right' });
-  await page.locator('.fp-sidebar-ctx-item', { hasText: 'Delete Folder' }).click();
+  await clickFolderCtxItem(page, 'f2', 'Delete Folder');
 
   await expect(page.locator('[data-sidebar-folder-uid="f2"]')).toHaveCount(0);
   await expect

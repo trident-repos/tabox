@@ -4,7 +4,7 @@ import { MdClose, MdSearch } from 'react-icons/md';
 import { useAtomValue } from 'jotai';
 import { settingsDataState } from './atoms/globalAppSettingsState';
 import { getColorValue } from './utils/colorMigration';
-import { FALLBACK_FAVICON } from './utils/sharedConstants';
+import { FALLBACK_FAVICON, safeFavIconUrl } from './utils/sharedConstants';
 import { showSuccessToast, showErrorToast } from './toastHelpers';
 import './MoveToCollectionModal.css';
 
@@ -150,7 +150,7 @@ function MoveToCollectionModal({
                 
                 <div className="move-modal-tab-info">
                     <img 
-                        src={tab.favIconUrl || FALLBACK_FAVICON}
+                        src={safeFavIconUrl(tab.favIconUrl)}
                         alt=""
                         className="tab-favicon"
                         onError={(e) => { e.target.src = FALLBACK_FAVICON; }}

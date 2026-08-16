@@ -6,6 +6,7 @@ import AIButton from './AIButton';
 import './CollectionListOptions.css';
 import { PiGridNineFill } from "react-icons/pi";
 import { browser } from '../static/globals';
+import { openOrFocusFullPageInCurrentWindow } from './utils/openFullPage';
 import Select, { components } from 'react-select';
 import {
     MdAccessTime,
@@ -23,6 +24,7 @@ import { showSuccessToast, showErrorToast } from './toastHelpers';
 import { Tooltip } from 'react-tooltip';
 // Lazy load rarely-used modals for better performance
 const CreateFolderModal = lazy(() => import('./CreateFolderModal'));
+const ImportFullPageModal = lazy(() => import('./ImportFullPageModal'));
 
 
 const sortOptions = [
@@ -65,6 +67,7 @@ export function CollectionListOptions(props) {
     const [openInNewWindow, setOpenInNewWindow] = useState(false);
     const [viewMode, setViewMode] = useState('list'); // 'list' or 'grid'
     const [isFolderModalOpen, setIsFolderModalOpen] = useState(false);
+    const [isImportFullPageModalOpen, setIsImportFullPageModalOpen] = useState(false);
     const isMountedRef = useRef(true);
     const fileInputRef = useRef(null);
     const menuPortalTarget = typeof document !== 'undefined' ? document.body : null;
@@ -229,7 +232,9 @@ export function CollectionListOptions(props) {
 
     useEffect(() => {
         const openFolder = () => setIsFolderModalOpen(true);
-        const openImport = () => fileInputRef.current?.click();
+        // Route through handleImportClick so the command palette's Import also
+        // shows the full-page modal on Firefox/Linux (issue #68).
+        const openImport = () => handleImportClick();
         window.addEventListener('tabox:open-create-folder', openFolder);
         window.addEventListener('tabox:open-import', openImport);
         return () => {
@@ -252,8 +257,41 @@ export function CollectionListOptions(props) {
         }
     };
 
-    const handleImportClick = () => {
+    // Issue #68: on Firefox, and on any browser on Linux, the OS file dialog
+    // steals focus and the browser destroys the popup document before a file can
+    // be selected — the picker must run from the full-page view (a regular tab).
+    // Other platforms keep the in-popup picker.
+    const importNeedsFullPage = async () => {
+        if (browser.runtime.getURL('').startsWith('moz-extension://')) return true;
+        try {
+            const { os } = await browser.runtime.getPlatformInfo();
+            return os === 'linux';
+        } catch {
+            return false;
+        }
+    };
+
+    const handleImportClick = async () => {
+        if (await importNeedsFullPage()) {
+            setIsImportFullPageModalOpen(true);
+            return;
+        }
         fileInputRef.current?.click();
+    };
+
+    const handleImportOpenFullPage = async () => {
+        setIsImportFullPageModalOpen(false);
+        try {
+            // The full-page view consumes this flag on mount and opens its picker
+            // (where the platform allows a non-gesture picker; otherwise the user
+            // clicks Import there).
+            await browser.storage.local.set({ pendingImportRequest: Date.now() });
+            await openOrFocusFullPageInCurrentWindow();
+            window.close();
+        } catch (error) {
+            console.error('[Import UI] Failed to open full-page import:', error);
+            showErrorToast('Could not open the Full Page view');
+        }
     };
 
     const handleFileSelection = async (event) => {
@@ -431,6 +469,11 @@ export function CollectionListOptions(props) {
                     isOpen={isFolderModalOpen}
                     onClose={handleFolderModalClose}
                     onSave={handleFolderSave}
+                />
+                <ImportFullPageModal
+                    isOpen={isImportFullPageModalOpen}
+                    onClose={() => setIsImportFullPageModalOpen(false)}
+                    onOpenFullPage={handleImportOpenFullPage}
                 />
             </Suspense>
             <Tooltip

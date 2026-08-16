@@ -1,5 +1,6 @@
 // app/DuplicateSweepPanel.js
 import React, { useEffect, useState } from 'react';
+import { safeFavIconUrl } from './utils/sharedConstants';
 import './DuplicateSweepPanel.css';
 
 const CONFETTI_COLORS = ['#4361ee', '#22d3ee', '#2aa876', '#f6b73c', '#ef476f', '#9b5de5'];
@@ -223,7 +224,7 @@ function tabRowsForGroup(group, rec) {
             key: u.normalizedUrl || `row-${i}`,
             title: bestByUrl.get(u.normalizedUrl) || occ.title || tab.title || occ.url || tab.url || 'Untitled',
             url: occ.url || tab.url || u.normalizedUrl || '',
-            favIconUrl: tab.favIconUrl || occ.favIconUrl || '',
+            favIconUrl: safeFavIconUrl(tab.favIconUrl || occ.favIconUrl || '', null) || '',
         };
     });
 }

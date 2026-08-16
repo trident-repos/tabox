@@ -786,6 +786,23 @@ function FPContentArea({
         return () => { isMountedRef.current = false; };
     }, []);
 
+    // Issue #68: on Firefox/Linux the popup can't run the file picker (the OS
+    // dialog destroys the popup document), so its Import routes here with a
+    // pendingImportRequest flag. Consume it once and open the picker — where the
+    // platform blocks non-gesture pickers the user just clicks Import here.
+    useEffect(() => {
+        const consumePendingImport = async () => {
+            const { pendingImportRequest } = await browser.storage.local.get('pendingImportRequest');
+            if (!pendingImportRequest) return;
+            await browser.storage.local.remove('pendingImportRequest');
+            // Only honor recent requests so a stale flag can't pop a picker later.
+            if (Date.now() - pendingImportRequest < 30000) {
+                fileInputRef.current?.click();
+            }
+        };
+        consumePendingImport();
+    }, []);
+
     // Command palette integration: listen for custom events to open modals/file picker
     useEffect(() => {
         const openFolder = () => setFolderModalOpen(true);
@@ -818,17 +835,6 @@ function FPContentArea({
             updateSelectedCollectionUids((previous) => (previous.size > 0 ? new Set() : previous));
         }
     }, [isLightweightView, updateSelectedCollectionUids]);
-
-    useEffect(() => {
-        setSelectedTabSessionEntryKeys((previous) => {
-            if (previous.size === 0) {
-                return previous;
-            }
-
-            const next = new Set([...previous].filter((entryKey) => visibleSingleTabEntryKeySet.has(entryKey)));
-            return next.size === previous.size ? previous : next;
-        });
-    }, [visibleSingleTabEntryKeySet]);
 
     useEffect(() => {
         const timer = setTimeout(() => setShowEntranceAnimation(false), 450);
@@ -888,7 +894,6 @@ function FPContentArea({
 
     const sourceCollections = optimisticCollections || collections;
     const hasSearchQuery = !!search?.trim();
-    const disableCollectionDragAndDrop = disableDrag || hasSelectedCollections || hasSearchQuery;
     const viewModeToggleTooltip = hasSearchQuery
         ? 'View mode is unavailable while search is active'
         : viewMode === 'grid'
@@ -978,6 +983,19 @@ function FPContentArea({
         () => new Set(visibleSingleTabSessionEntries.map((entry) => entry.sessionEntryKey)),
         [visibleSingleTabSessionEntries],
     );
+
+    // Prune selections that are no longer visible. Lives below the memo it
+    // depends on (const TDZ — the dependency array reads it at render time).
+    useEffect(() => {
+        setSelectedTabSessionEntryKeys((previous) => {
+            if (previous.size === 0) {
+                return previous;
+            }
+
+            const next = new Set([...previous].filter((entryKey) => visibleSingleTabEntryKeySet.has(entryKey)));
+            return next.size === previous.size ? previous : next;
+        });
+    }, [visibleSingleTabEntryKeySet]);
 
     const selectedVisibleTabSessionEntries = useMemo(
         () => visibleSingleTabSessionEntries.filter((entry) => selectedTabSessionEntryKeys.has(entry.sessionEntryKey)),
@@ -1199,6 +1217,8 @@ function FPContentArea({
     );
 
     const hasSelectedCollections = selectedVisibleCollections.length > 0;
+    // Lives below hasSelectedCollections, which it reads at render time (const TDZ).
+    const disableCollectionDragAndDrop = disableDrag || hasSelectedCollections || hasSearchQuery;
     const allVisibleCollectionsSelected = visibleCollections.length > 0 &&
         selectedVisibleCollections.length === visibleCollections.length;
     const hasSelectedCollectionsInFolders = selectedVisibleCollections.some((collection) => !!collection.parentId);
