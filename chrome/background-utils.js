@@ -1028,8 +1028,14 @@ async function applyChromeGroupSettings(windowId, collection) {
         existingGroups = [];
     }
     for (const chromeGroup of collection.chromeGroups) {
+        // Match by the stable groupUid (what the UI groups by) — the numeric
+        // Chrome-session groupId drifts across sync/merge/import, so relying on
+        // it silently restored every tab flat. Legacy tabs/groups that predate
+        // groupUid fall back to the numeric id.
         const tabsToGroup = collection.tabs
-            .filter(({ groupId }) => chromeGroup.id === groupId)
+            .filter((tab) => (tab.groupUid && chromeGroup.uid)
+                ? tab.groupUid === chromeGroup.uid
+                : tab.groupId === chromeGroup.id)
             .map((t) => t.newTabId)
             .filter((id) => id !== undefined && id !== null);
         if (tabsToGroup.length === 0) {
@@ -2676,6 +2682,7 @@ const backgroundUtilsApi = {
     handleContextMenuClickBG,
     handleContextMenuCreation,
     handleMenuStorageChanged,
+    applyChromeGroupSettings,
 };
 
 if (typeof globalThis !== 'undefined') {
