@@ -52,6 +52,8 @@ jobs:
         run: yarn install --immutable
       - name: Build release bundle
         run: yarn build:release
+      - name: Build Firefox release bundle
+        run: yarn build:release:firefox
       - name: Verify no credentials are bundled
         # The Google OAuth token exchange runs on the Tabox Worker (wrangler
         # secret GOOGLE_CLIENT_SECRET backing POST /auth/token), so the bundle
@@ -75,11 +77,20 @@ jobs:
           jq 'del(.key)' build/manifest.json > edge-build/manifest.json
           cd edge-build
           zip -r ../tabox-edge.zip .
+          cd ..
+          # AMO requires the source code for minified bundles; the repo
+          # tree (with build instructions in the README) is the source.
+          git archive HEAD -o tabox-source.zip
       - name: Store packaged extension
         uses: actions/upload-artifact@v7
         with:
           name: tabox-chrome
           path: tabox.zip
+      - name: Store packaged Firefox extension
+        uses: actions/upload-artifact@v7
+        with:
+          name: tabox-firefox
+          path: build-firefox/
       - name: Upload & publish to the Chrome Web Store
         # https://developer.chrome.com/docs/webstore/using-api
         env:
@@ -231,3 +242,56 @@ jobs:
           }
           echo "${PUBLISH_RESULT}"
           echo "Edge Add-ons publish submitted successfully"
+      - name: Upload & publish to Firefox Add-ons
+        # https://extensionworkshop.com/documentation/develop/web-ext-command-reference/#web-ext-sign
+        # Runs as long as the package was built, even if another store's
+        # publish step failed, so one store's outage doesn't block the other.
+        if: ${{ !cancelled() && steps.package.outcome == 'success' }}
+        env:
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+          # Public AMO listing (gecko id tabox@tabox.co).
+          AMO_ADDON_ID: tabox@tabox.co
+        run: |
+          set -euo pipefail
+
+          if [ -z "${AMO_JWT_ISSUER}" ] || [ -z "${AMO_JWT_SECRET}" ]; then
+            echo "AMO_JWT_ISSUER / AMO_JWT_SECRET secrets are missing or empty"; exit 1
+          fi
+
+          # Skip when the listing already carries this version. Like Edge,
+          # the public listing lags while a submission is still in review,
+          # so the in-review case is caught by the duplicate-version check
+          # below instead; lookup failures fall through to the API.
+          MANIFEST_VERSION=$(jq -r .version build-firefox/manifest.json)
+          LIVE_VERSION=$(curl -sS "https://addons.mozilla.org/api/v5/addons/addon/${AMO_ADDON_ID}/" | jq -r '.current_version.version // empty' || true)
+          if [ -n "${LIVE_VERSION}" ] && [ "${LIVE_VERSION}" = "${MANIFEST_VERSION}" ]; then
+            echo "Firefox Add-ons already has version ${LIVE_VERSION}; skipping publish."
+            exit 0
+          fi
+          echo "Manifest version ${MANIFEST_VERSION}, live version ${LIVE_VERSION:-unknown} — publishing."
+
+          # --approval-timeout 0 returns after upload + validation instead
+          # of waiting for AMO review; the version goes live once approved.
+          set +e
+          SIGN_OUTPUT=$(npx web-ext sign \
+            --source-dir build-firefox \
+            --channel listed \
+            --api-key "${AMO_JWT_ISSUER}" \
+            --api-secret "${AMO_JWT_SECRET}" \
+            --upload-source-code tabox-source.zip \
+            --approval-timeout 0 \
+            --no-input 2>&1)
+          SIGN_EXIT=$?
+          set -e
+          echo "${SIGN_OUTPUT}"
+          if [ ${SIGN_EXIT} -ne 0 ]; then
+            # A previous merge already submitted this version and it is
+            # still in AMO's review queue — effectively already published.
+            if echo "${SIGN_OUTPUT}" | grep -qi "already exists"; then
+              echo "Version ${MANIFEST_VERSION} was already submitted; skipping publish."
+              exit 0
+            fi
+            echo "Firefox Add-ons publish failed"; exit 1
+          fi
+          echo "Firefox Add-ons publish submitted successfully"
